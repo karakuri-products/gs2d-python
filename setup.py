@@ -13,6 +13,7 @@ setup(
     version='0.0.2',
     description='gs2d: The Library for Generic Serial-bus Servo Driver kr-sac001 for Python',
     long_description=open('README.md').read(),
+    long_description_content_type='text/markdown',
     author='Hideyuki Takei',
     author_email='hide@krkrpro.com',
     install_requires=read_requirements(),
