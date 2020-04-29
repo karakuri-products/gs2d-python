@@ -12,11 +12,11 @@ setup(
     name='gs2d',
     version='0.0.1',
     description='gs2d: Generic Serial-bus Servo Driver library for Python',
-    long_description='gs2d makes us feel good!',
+    long_description='Library for Generic Serial-bus Servo Driver library kr-sac001 from Karakuri Products',
     author='Hideyuki Takei',
     author_email='hide@krkrpro.com',
     install_requires=read_requirements(),
-    url='https://github.com/krkrpro/gs2d-python',
+    url='https://github.com/karakuri-products/gs2d-python',
     license='Apache License Version 2.0',
     packages=find_packages(exclude=('tests', 'docs'))
 )
