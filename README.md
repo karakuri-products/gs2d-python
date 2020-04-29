@@ -1,34 +1,44 @@
 # gs2d: Generic Serial-bus Servo Driver library for Python
 
+> karakuri products社製シリアルサーボドライバ kr-sac001 用の Python ライブラリ
+
 ---
 
-## Features
+## 機能
 
-TBD
+- [karakuri products社製シリアルサーボドライバ kr-sac001](https://github.com/karakuri-products) に接続されたサーボモータを Python で簡単にコントロールできるライブラリです。
+- 様々なブランドのサーボモータをほぼ同じ関数で制御が可能です。
+- Read系コマンドはBlockingスタイル、callbackスタイル、asyncスタイルで利用可能です。
 
-## Supported servo motors
-- KONDO KRS300x
-- KONDO KRS400x
-- JR programmable
-- FUTABA RS40x
-- Dynamixel X
-- Vstone Vs-xxx
+## サポートしているサーボモータ
 
-## Installation
+- 現在対応しているサーボモータ
+    - FUTABA RS40x
 
-### Using pip
+- もうすぐ対応するサーボモータ
+    - Dynamixel X
+
+- 対応したいな、と思っているサーボモータ
+    - KONDO KRS300x
+    - KONDO KRS400x
+    - JR programmable
+    - Vstone Vs-xxx
+
+## インストール方法
 
 ```
 pip install gs2d
 ```
 
-## How this library looks like
+## 利用例
+
+### フタバのサーボモータID:1をちょっとずつ動かす
 
 ```
 from gs2d import SerialInterface, Futaba
 
 # Initialize
-si = SerialInterface('/dev/tty.usbserial-A601X0TE')
+si = SerialInterface()
 futaba = Futaba(si)
 
 # Enable torque
@@ -47,6 +57,73 @@ futaba.set_torque_enable(False, sid=1)
 futaba.close()
 si.close()
 ```
+
+### フタバのサーボモータID:1の電圧を取得する (Blocking版)
+
+```
+from gs2d import SerialInterface, Futaba
+
+# 初期化
+si = SerialInterface()
+futaba = Futaba(si)
+
+# 電圧取得
+v = futaba.get_voltage(sid=1)
+print('Voltage: %.2f(V)' % v)
+
+# クローズ
+futaba.close()
+si.close()
+```
+
+### フタバのサーボモータID:1の電圧を取得する (コールバック版)
+
+```
+from gs2d import SerialInterface, Futaba
+
+def voltage_callback(voltage):
+    """電圧取得できたときに呼ばれる"""
+    print('Voltage: %.2f(V)' % voltage)
+
+    # クローズ
+    futaba.close()
+    si.close()
+
+# 初期化
+si = SerialInterface()
+futaba = Futaba(si)
+
+# コールバックつきで電圧取得
+futaba.get_voltage(sid=1, callback=voltage_callback)
+```
+
+### フタバのサーボモータID:1の電圧を取得する (Async版)
+
+```
+import asyncio
+from gs2d import SerialInterface, Futaba
+
+async def main(loop):
+    # Initialize SerialInterface & servo object
+    si = SerialInterface()
+    futaba = Futaba(si)
+
+    # Get voltage
+    voltage = await futaba.get_voltage_async(sid=1)
+    print('Voltage: %.2f(V)' % voltage)
+
+    # Close SerialInterface & servo object
+    futaba.close()
+    si.close()
+
+
+# Initialize event loop
+lp = asyncio.get_event_loop()
+lp.run_until_complete(main(lp))
+lp.close()
+```
+
+
 
 ## API
 
