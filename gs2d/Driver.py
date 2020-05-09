@@ -122,6 +122,25 @@ class Driver(metaclass=ABCMeta):
                 command = self.command_queue.pop()
                 self.__send_command(command['data'], command['recv_callback'])
 
+    def __async_wrapper(self, loop=None):
+        """async対応するための関数
+
+        :param loop:
+        :return:
+        """
+
+        if loop is None:
+            loop = asyncio.get_event_loop()
+
+        f = loop.create_future()
+
+        def callback(result):
+            loop.call_soon_threadsafe(
+                lambda: f.set_result(result)
+            )
+
+        return f, callback
+
     def add_command_queue(self, data, recv_callback=None):
         """送信するコマンドを送信バッファに追加する
 
@@ -161,9 +180,19 @@ class Driver(metaclass=ABCMeta):
             # コマンドバッファポーリングの終了を待つ
             self.polling_thread.join()
 
+    # @staticmethod
+    # @abstractmethod
+    # def __get_bytes(data, byte_length):
+    #     raise NotImplementedError()
+
     @staticmethod
     @abstractmethod
-    def __get_bytes(data, byte_length):
+    def __get_checksum(self, data):
+        raise NotImplementedError()
+
+    @staticmethod
+    @abstractmethod
+    def __check_sid(self, sid):
         raise NotImplementedError()
 
     @abstractmethod
@@ -172,7 +201,15 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def get_torque_enable(self, sid, callback=None):
+    def ping(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def ping_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_torque_enable(self, sid, loop=None):
         raise NotImplementedError()
 
     @abstractmethod

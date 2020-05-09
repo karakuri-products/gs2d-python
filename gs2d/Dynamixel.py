@@ -375,27 +375,7 @@ class Dynamixel(Driver):
             return True
 
     @staticmethod
-    def __async_wrapper(loop=None):
-        """async対応するための関数
-
-        :param loop:
-        :return:
-        """
-
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        f = loop.create_future()
-
-        def callback(result):
-            loop.call_soon_threadsafe(
-                lambda: f.set_result(result)
-            )
-
-        return f, callback
-
-    @staticmethod
-    def __check_sid(sid):
+    def __check_sid(self, sid):
         """Servo IDのレンジをチェック
 
         :param sid:
@@ -414,6 +394,7 @@ class Dynamixel(Driver):
         :return: {
             'model_no': bytearray (2bytes),
             'version_firmware': int (1byte)
+        }
         """
 
         # サーボIDのチェック
@@ -431,6 +412,18 @@ class Dynamixel(Driver):
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
         return self.__get_function(self.INSTRUCTION_PING, None, response_process, sid=sid, length=3, callback=callback)
+
+    def ping_async(self, sid, loop=None):
+        """サーボにPINGを送る async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.__async_wrapper(loop)
+        self.ping(sid, callback=callback)
+        return f
 
     def get_torque_enable(self, sid, callback=None):
         """トルクON取得

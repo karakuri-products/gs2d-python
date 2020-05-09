@@ -280,25 +280,6 @@ class Futaba(Driver):
         else:
             return True
 
-    def __async_wrapper(self, loop=None):
-        """async対応するための関数
-
-        :param loop:
-        :return:
-        """
-
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        f = loop.create_future()
-
-        def callback(result):
-            loop.call_soon_threadsafe(
-                lambda: f.set_result(result)
-            )
-
-        return f, callback
-
     def __check_sid(self, sid):
         """Servo IDのレンジをチェック
 
@@ -339,6 +320,45 @@ class Futaba(Driver):
 
         f, callback = self.__async_wrapper(loop)
         self.get_torque_enable(sid, callback=callback)
+        return f
+
+    def ping(self, sid, callback=None):
+        """サーボにPINGを送る
+        FutabaにはPINGコマンドはないので、get_servo_idで代用。
+
+        :param sid:
+        :param callback:
+        :return: {
+            'model_no': bytearray (2bytes),
+            'version_firmware': int (1byte)
+        }
+        """
+
+        # TODO: model_noとversion_firmwareをreadで一気に取得する方式に変更
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        if callback:
+            def inner_callback(_sid):
+                if callback:
+                    callback(_sid == sid)
+
+            self.get_servo_id(sid, callback=inner_callback)
+        else:
+            servo_id = self.get_servo_id(sid)
+            return sid == servo_id
+
+    def ping_async(self, sid, loop=None):
+        """サーボにPINGを送る async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.__async_wrapper(loop)
+        self.ping(sid, callback=callback)
         return f
 
     def set_torque_enable(self, on_off, sid):
