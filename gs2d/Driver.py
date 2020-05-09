@@ -161,6 +161,11 @@ class Driver(metaclass=ABCMeta):
             # コマンドバッファポーリングの終了を待つ
             self.polling_thread.join()
 
+    @staticmethod
+    @abstractmethod
+    def __get_bytes(data, byte_length):
+        raise NotImplementedError()
+
     @abstractmethod
     def is_complete_response(self, response_data):
         """レスポンスデータをすべて受信できたかチェック"""

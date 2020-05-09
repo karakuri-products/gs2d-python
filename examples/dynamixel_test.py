@@ -5,6 +5,7 @@ import sys
 import traceback
 import asyncio
 import logging
+import time
 
 sys.path.insert(0, '..')
 from gs2d import SerialInterface, Dynamixel
@@ -19,10 +20,16 @@ async def main(loop):
     si = SerialInterface(baudrate=3000000)
     dm = Dynamixel(si)
 
-    #print(dm.ping(1))
+    print(dm.ping(1))
 
     dm.set_torque_enable(True, sid=1)
-    dm.set_target_position(179, sid=1)
+
+    # 0.5秒ごとにサーボを動かす
+    for i in range(11):
+        angle = i * 20 - 100
+        print('Angle:', angle, 'deg')
+        dm.set_target_position(angle, sid=1)
+        time.sleep(0.5)
 
     # クローズ
     dm.close(force=False)

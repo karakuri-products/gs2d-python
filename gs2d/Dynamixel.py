@@ -128,7 +128,8 @@ class Dynamixel(Driver):
             # logger.debug('###', count, len(response_data))
             return len(response_data) >= (7 + count)
 
-    def __get_bytes(self, data, byte_length):
+    @staticmethod
+    def __get_bytes(data, byte_length):
         """intのデータを指定のバイト数のlittle-endianデータに変換
 
         :param data:
@@ -141,7 +142,8 @@ class Dynamixel(Driver):
             data_bytes.insert(0, int(data_hex[i*2:i*2+2], 16))
         return data_bytes
 
-    def __get_checksum(self, data):
+    @staticmethod
+    def __get_checksum(data):
         """チェックサム(CRC-16-IBM)を生成
 
         :param data:
@@ -304,8 +306,6 @@ class Dynamixel(Driver):
             nonlocal is_received
             nonlocal is_checksum_error
 
-            recv_data = None
-
             # ステータスパケットのチェックサムが正しいかチェック
             checksum = response[-2:]
             generated_checksum = self.__get_checksum(response[:-2])
@@ -374,7 +374,8 @@ class Dynamixel(Driver):
         else:
             return True
 
-    def __async_wrapper(self, loop=None):
+    @staticmethod
+    def __async_wrapper(loop=None):
         """async対応するための関数
 
         :param loop:
@@ -393,7 +394,8 @@ class Dynamixel(Driver):
 
         return f, callback
 
-    def __check_sid(self, sid):
+    @staticmethod
+    def __check_sid(sid):
         """Servo IDのレンジをチェック
 
         :param sid:
