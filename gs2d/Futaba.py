@@ -94,7 +94,8 @@ class Futaba(Driver):
             # print('####', count, len(response_data))
             return len(response_data) == (8 + count)
 
-    def __get_checksum(self, data):
+    @staticmethod
+    def __get_checksum(data):
         """チェックサムを生成
 
         :param data:
@@ -105,6 +106,17 @@ class Futaba(Driver):
         for i in range(2, len(data)):
             checksum ^= data[i]
         return checksum
+
+    @staticmethod
+    def __check_sid(sid):
+        """Servo IDのレンジをチェック
+
+        :param sid:
+        :return:
+        """
+
+        if sid < 1 or sid > 127:
+            raise BadInputParametersException('sid: %d がレンジ外です。1から127のIDを設定してください。' % sid)
 
     def __generate_command(self, sid, addr, data=None, flag=0, count=1, length=None):
         """コマンド生成
@@ -279,16 +291,6 @@ class Futaba(Driver):
             return data
         else:
             return True
-
-    def __check_sid(self, sid):
-        """Servo IDのレンジをチェック
-
-        :param sid:
-        :return:
-        """
-
-        if sid < 1 or sid > 127:
-            raise BadInputParametersException('sid: %d がレンジ外です。1から127のIDを設定してください。' % sid)
 
     def get_torque_enable(self, sid, callback=None):
         """トルクON取得

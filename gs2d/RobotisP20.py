@@ -14,8 +14,8 @@ from .Util import get_printable_hex
 logger = logging.getLogger(__name__)
 
 
-class Dynamixel(Driver):
-    """DYNAMIXELのシリアルサーボクラス
+class RobotisP20(Driver):
+    """Robotis社のP2.0のプロトコルに対応したシリアルサーボクラス
 
     """
 
@@ -114,7 +114,7 @@ class Dynamixel(Driver):
         """初期化
         """
 
-        super(Dynamixel, self).__init__(serial_interface)
+        super(RobotisP20, self).__init__(serial_interface)
 
     def is_complete_response(self, response_data):
         """レスポンスデータをすべて受信できたかチェック"""
@@ -139,7 +139,7 @@ class Dynamixel(Driver):
         data_hex = format(int(data) & (2 ** (8 * byte_length) - 1), '0{}x'.format(byte_length * 2))
         data_bytes = []
         for i in range(byte_length):
-            data_bytes.insert(0, int(data_hex[i*2:i*2+2], 16))
+            data_bytes.insert(0, int(data_hex[i * 2:i * 2 + 2], 16))
         return data_bytes
 
     @staticmethod
@@ -169,6 +169,18 @@ class Dynamixel(Driver):
         crc = [crc_hex_l, crc_hex_h]
 
         return crc
+
+    @staticmethod
+    def __check_sid(sid):
+        """Servo IDのレンジをチェック
+
+        :param sid:
+        :return:
+        """
+
+        # 0~252(0x00~0xFC)の範囲及び254(0xFE)ならOK
+        if sid < 0 or sid > 254 or sid == 253:
+            raise BadInputParametersException('sid: %d がレンジ外です。0~252(0x00~0xFC)の範囲及び254(0xFE)のIDを設定してください。' % sid)
 
     def __generate_command(self, sid, instruction, parameters=None, length=None):
         """コマンド生成
@@ -373,18 +385,6 @@ class Dynamixel(Driver):
             return data
         else:
             return True
-
-    @staticmethod
-    def __check_sid(self, sid):
-        """Servo IDのレンジをチェック
-
-        :param sid:
-        :return:
-        """
-
-        # 0~252(0x00~0xFC)の範囲及び254(0xFE)ならOK
-        if sid < 0 or sid > 254 or sid == 253:
-            raise BadInputParametersException('sid: %d がレンジ外です。0~252(0x00~0xFC)の範囲及び254(0xFE)のIDを設定してください。' % sid)
 
     def ping(self, sid, callback=None):
         """サーボにPINGを送る

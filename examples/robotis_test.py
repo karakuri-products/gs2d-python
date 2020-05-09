@@ -8,7 +8,7 @@ import logging
 import time
 
 sys.path.insert(0, '..')
-from gs2d import SerialInterface, Dynamixel
+from gs2d import SerialInterface, RobotisP20
 
 # ログ設定
 logging.basicConfig()
@@ -18,7 +18,7 @@ logging.getLogger('gs2d').setLevel(level=logging.DEBUG)
 async def main(loop):
     # 初期化
     si = SerialInterface(baudrate=3000000)
-    dm = Dynamixel(si)
+    dm = RobotisP20(si)
 
     print(dm.ping(1))
 
