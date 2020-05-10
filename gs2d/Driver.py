@@ -1,8 +1,10 @@
 from abc import ABCMeta, abstractmethod
 from collections import deque
+import asyncio
 import threading
 import time
 import logging
+import struct
 
 from .Util import CommandBufferOverflowException, NotEnablePollingCommandException, get_printable_hex
 
@@ -122,7 +124,8 @@ class Driver(metaclass=ABCMeta):
                 command = self.command_queue.pop()
                 self.__send_command(command['data'], command['recv_callback'])
 
-    def __async_wrapper(self, loop=None):
+    @staticmethod
+    def async_wrapper(loop=None):
         """async対応するための関数
 
         :param loop:
@@ -140,6 +143,26 @@ class Driver(metaclass=ABCMeta):
             )
 
         return f, callback
+
+    @staticmethod
+    def get_bytes(data, byte_length):
+        """intのデータを指定のバイト数のlittle-endianデータに変換
+
+        :param data:
+        :param byte_length:
+        :return:
+        """
+
+        data_hex = struct.pack('<H', int(data) & (2 ** (8 * byte_length) - 1))
+        data_bytes = []
+
+        for i in range(byte_length):
+            if i < len(data_hex):
+                data_bytes.append(int(struct.unpack('<B', data_hex[i:i+1])[0]))
+            else:
+                data_bytes.append(0)
+
+        return data_bytes
 
     def add_command_queue(self, data, recv_callback=None):
         """送信するコマンドを送信バッファに追加する

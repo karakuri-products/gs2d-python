@@ -1,7 +1,6 @@
 # ! /usr/bin/env python3
 # encoding: utf-8
 
-import asyncio
 import time
 import logging
 
@@ -127,20 +126,6 @@ class RobotisP20(Driver):
             count = response_data[5]
             # logger.debug('###', count, len(response_data))
             return len(response_data) >= (7 + count)
-
-    @staticmethod
-    def __get_bytes(data, byte_length):
-        """intのデータを指定のバイト数のlittle-endianデータに変換
-
-        :param data:
-        :param byte_length:
-        :return:
-        """
-        data_hex = format(int(data) & (2 ** (8 * byte_length) - 1), '0{}x'.format(byte_length * 2))
-        data_bytes = []
-        for i in range(byte_length):
-            data_bytes.insert(0, int(data_hex[i * 2:i * 2 + 2], 16))
-        return data_bytes
 
     @staticmethod
     def __get_checksum(data):
@@ -472,7 +457,7 @@ class RobotisP20(Driver):
         torque_data = 0x01 if on_off else 0x00
 
         # コマンド生成
-        address = self.__get_bytes(self.ADDR_TORQUE_ENABLE, 2)
+        address = self.get_bytes(self.ADDR_TORQUE_ENABLE, 2)
         parameters = address + [torque_data]
 
         command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
@@ -582,7 +567,7 @@ class RobotisP20(Driver):
         return f
 
     def set_target_position(self, position_degree, sid=1):
-        """指示位置設定 (単位: 度。設定可能な範囲は-150.0 度~+150.0 度)
+        """指示位置設定 (単位: 度。設定可能な範囲は-180.0 度~+180.0 度)
 
         :param position_degree:
         :param sid:
@@ -602,10 +587,10 @@ class RobotisP20(Driver):
         position_degree += 180
 
         # ポジションを4バイトデータに変換
-        position_data = self.__get_bytes(position_degree * 4096 / 360, 4)
+        position_data = self.get_bytes(position_degree * 4096 / 360, 4)
 
         # コマンド生成
-        address = self.__get_bytes(self.ADDR_GOAL_POSITION, 2)
+        address = self.get_bytes(self.ADDR_GOAL_POSITION, 2)
         parameters = address + position_data
 
         command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
