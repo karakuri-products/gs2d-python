@@ -141,8 +141,7 @@ class RobotisP20(Driver):
         if self.command_handler:
             self.command_handler.close()
 
-    @staticmethod
-    def __get_checksum(data):
+    def __get_checksum(self, data):
         """チェックサム(CRC-16-IBM)を生成
 
         :param data:
@@ -162,10 +161,7 @@ class RobotisP20(Driver):
                     crc ^= g
 
         # CRCを2bytesに
-        crc_hex = format(int(crc) & 0xffff, '04x')
-        crc_hex_h = int(crc_hex[0:2], 16)
-        crc_hex_l = int(crc_hex[2:4], 16)
-        crc = [crc_hex_l, crc_hex_h]
+        crc = self.get_bytes(crc, 2)
 
         return crc
 
@@ -218,11 +214,9 @@ class RobotisP20(Driver):
             else:
                 # パラメータなしなので、Instruction(1) + Checksum(2) = 3bytes
                 length = 3
+
         # Lengthを2bytesのデータに変換
-        length_hex = format(int(length) & 0xffff, '04x')
-        length_hex_h = int(length_hex[0:2], 16)
-        length_hex_l = int(length_hex[2:4], 16)
-        command.extend([length_hex_l, length_hex_h])
+        command.extend(self.get_bytes(length, 2))
 
         # Instruction
         command.append(instruction)
@@ -319,32 +313,29 @@ class RobotisP20(Driver):
 
             # ステータスパケットのチェックサムが正しいかチェック
             if len(response) > 2:
-                checksum = response[-2:]
-                generated_checksum = self.__get_checksum(response[:-2])
-                if checksum[0] != generated_checksum[0] or checksum[1] != generated_checksum[1]:
-                    logger.debug('Check sum error: ' + get_printable_hex(response))
-                    is_checksum_error = True
-                    return
-
-                # 受信済み
-                is_received = True
-
+                print('$$$$$$$$$$$$', response, len(response))
+                # パラメーターindexまでデータがあるか
                 if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
                     # TODO: ステータスパケット長エラーexception
+                    print('ステータスパケット長エラーexception')
                     return
 
                 # ステータスパケットからInstructionを取得し、0x55かチェック
                 status_packet_instruction = response[self.STATUS_PACKET_INSTRUCTION_INDEX]
                 if status_packet_instruction != self.STATUS_PACKET_INSTRUCTION:
                     # TODO: ステータスパケット異常exception
+                    print('ステータスパケット異常exception ステータスパケットからInstructionを取得し、0x55かチェック')
                     return
 
                 # ステータスパケットからlengthを取得
                 status_packet_length = response[self.STATUS_PACKET_LENGTH_INDEX:self.STATUS_PACKET_LENGTH_INDEX + 2]
                 status_packet_length = int.from_bytes(status_packet_length, 'little', signed=True)
 
-                if len(response) != self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
+                if len(response) < self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
+                    print('FFFF', len(response), self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length)
                     # TODO: ステータスパケット異常exception
+                    print('ステータスパケット異常exception ステータスパケットからlengthを取得')
+                    print('########', response)
                     return
 
                 # Errorバイト取得
@@ -352,6 +343,7 @@ class RobotisP20(Driver):
 
                 if status_packet_error > 0:
                     # TODO: ステータスパケットエラーexception
+                    print('ステータスパケットエラーexception')
                     return
 
                 # パラメータ取得
@@ -359,6 +351,21 @@ class RobotisP20(Driver):
                                 self.STATUS_PACKET_PARAMETER_INDEX:
                                 self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2
                                 ]
+
+                # チェックサム検証
+                checksum = response[
+                           self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2:
+                           self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length]
+                generated_checksum = self.__get_checksum(
+                    response[:self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2]
+                )
+                if checksum[0] != generated_checksum[0] or checksum[1] != generated_checksum[1]:
+                    logger.debug('Check sum error: ' + get_printable_hex(response))
+                    is_checksum_error = True
+                    return
+
+                # 受信済み
+                is_received = True
 
                 # データ処理
                 recv_data = response_process(response_data)
@@ -390,6 +397,21 @@ class RobotisP20(Driver):
             return data
         else:
             return True
+
+    def __generate_parameters_read_write(self, start_address, data, data_size):
+        """Read/Write系のパラメータを生成する
+
+        :param start_address:
+        :param data:
+        :param data_size:
+        :return:
+        """
+
+        params = []
+        params.extend(self.get_bytes(start_address, 2))
+        params.extend(self.get_bytes(data, data_size))
+
+        return params
 
     def ping(self, sid, callback=None):
         """サーボにPINGを送る
@@ -441,14 +463,15 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 1:
-        #         return response_data[0] == 0x01
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_TORQUE_ENABLE, self.FLAG30_MEM_MAP_SELECT, 1, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                return response_data[0] == 0x01
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_TORQUE_ENABLE, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_torque_enable_async(self, sid, loop=None):
         """トルクON取得async版
@@ -629,17 +652,19 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         # 単位は 0.1 度になっているので、度に変換
-        #         position = int.from_bytes(response_data, 'little', signed=True)
-        #         position /= 10
-        #         return position
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_PRESENT_POSITION_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                # 単位は 0.1 度になっているので、度に変換
+                position = int.from_bytes(response_data, 'little', signed=True)
+                position = position * 360 / 4096
+                position = position - 180
+                return position
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PRESENT_POSITION, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_current_position_async(self, sid, loop=None):
         """現在位置取得 async版 (単位: 度)

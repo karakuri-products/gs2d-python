@@ -97,15 +97,15 @@ class DefaultCommandHandler(ICommandHandler):
                 start = time.time()
 
                 # データを受信する
-                response = self.serial_interface.readline()
+                response = self.serial_interface.read()
 
                 # データが完全に受信できていないのであれば更に受信する
                 while not self.function_is_complete_response(response):
-                    response += self.serial_interface.readline()
+                    response += self.serial_interface.read()
 
                     # タイムアウトチェック
                     elapsed_time = time.time() - start
-                    if elapsed_time > RECEIVE_DATA_TIMEOUT_SEC:
+                    if elapsed_time > self.RECEIVE_DATA_TIMEOUT_SEC:
                         break
 
                 logger.debug('Response data: ' + get_printable_hex(response))

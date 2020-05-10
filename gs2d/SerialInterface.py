@@ -64,13 +64,13 @@ class SerialInterface(ISerialInterface):
 
         return self.__ser.write(data)
 
-    def readline(self):
-        """サーボからのデータ1行受信
+    def read(self):
+        """サーボからのデータ1文字受信
 
         :return:
         """
 
-        return self.__ser.readline()
+        return self.__ser.read()
 
     def is_open(self):
         """シリアルインタフェースがオープンされているかチェック

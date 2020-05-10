@@ -22,18 +22,22 @@ async def main(loop):
 
     sid = 1
 
-    print(robotis.ping(sid))
-
-    ping = await robotis.ping_async(sid)
-    print(ping)
+    # ping = await robotis.ping_async(sid)
+    # print(ping)
 
     robotis.set_torque_enable(True, sid=sid)
 
+    time.sleep(0.5)
+
+    print('Enable Torque?:', robotis.get_torque_enable(sid=sid))
+
     # 0.5秒ごとにサーボを動かす
     for i in range(11):
+        print('Current position:', robotis.get_current_position(sid))
+
         angle = i * 20 - 100
         print('Angle:', angle, 'deg')
-        robotis.set_target_position(angle, sid=1)
+        robotis.set_target_position(angle, sid=sid)
         time.sleep(0.5)
 
     # クローズ

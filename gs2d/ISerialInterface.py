@@ -10,7 +10,7 @@ class ISerialInterface(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def readline(self):
+    def read(self):
         raise NotImplementedError()
 
     @abstractmethod
