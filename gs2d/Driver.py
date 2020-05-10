@@ -27,9 +27,10 @@ class Driver(metaclass=ABCMeta):
         """初期化
         """
 
+        # command_handler_classが指定されていない場合はデフォルトのコマンドハンドラーにする
         if command_handler_class is None:
-            from .CommandHandler import CommandHandler
-            command_handler_class = CommandHandler
+            from .DefaultCommandHandler import DefaultCommandHandler
+            command_handler_class = DefaultCommandHandler
 
         self.command_handler = command_handler_class(serial_interface, self.is_complete_response)
 

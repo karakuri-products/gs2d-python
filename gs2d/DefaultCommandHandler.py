@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 MAX_COMMAND_QUEUE_LENGTH = 1024
 
 
-class CommandHandler(ICommandHandler):
+class DefaultCommandHandler(ICommandHandler):
     """
     Python3環境でのデータ送受信管理クラス
     別スレッドでコマンドバッファの監視およびデータ送信を行っています

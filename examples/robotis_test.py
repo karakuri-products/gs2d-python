@@ -18,21 +18,26 @@ logging.getLogger('gs2d').setLevel(level=logging.DEBUG)
 async def main(loop):
     # 初期化
     si = SerialInterface(baudrate=3000000)
-    dm = RobotisP20(si)
+    robotis = RobotisP20(si)
 
-    # print(dm.ping(1))
+    sid = 1
 
-    dm.set_torque_enable(True, sid=1)
+    print(robotis.ping(sid))
+
+    ping = await robotis.ping_async(sid)
+    print(ping)
+
+    robotis.set_torque_enable(True, sid=sid)
 
     # 0.5秒ごとにサーボを動かす
     for i in range(11):
         angle = i * 20 - 100
         print('Angle:', angle, 'deg')
-        dm.set_target_position(angle, sid=1)
+        robotis.set_target_position(angle, sid=1)
         time.sleep(0.5)
 
     # クローズ
-    dm.close(force=False)
+    robotis.close(force=False)
     si.close()
 
 

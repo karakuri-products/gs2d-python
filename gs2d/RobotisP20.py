@@ -426,7 +426,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.ping(sid, callback=callback)
         return f
 
@@ -458,7 +458,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_torque_enable(sid, callback=callback)
         return f
 
@@ -514,7 +514,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_temperature(sid, callback=callback)
         return f
 
@@ -547,7 +547,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_current(sid, callback=callback)
         return f
 
@@ -582,7 +582,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_target_position(sid, callback=callback)
         return f
 
@@ -649,7 +649,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_current_position(sid, callback=callback)
         return f
 
@@ -683,7 +683,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_voltage(sid, callback=callback)
         return f
 
@@ -718,7 +718,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_speed(sid, callback=callback)
         return f
 
@@ -779,7 +779,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_pid_coefficient(sid, callback=callback)
         return f
 
@@ -840,7 +840,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_max_torque(sid, callback=callback)
         return f
 
@@ -898,7 +898,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_speed(sid, callback=callback)
         return f
 
@@ -935,7 +935,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_servo_id(sid, callback=callback)
         return f
 
@@ -1010,7 +1010,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_baud_rate(sid, callback=callback)
         return f
 
@@ -1067,7 +1067,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_cw_position(sid, callback=callback)
         return f
 
@@ -1126,7 +1126,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_ccw_position(sid, callback=callback)
         return f
 
@@ -1185,7 +1185,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_temperature(sid, callback=callback)
         return f
 
@@ -1293,7 +1293,7 @@ class RobotisP20(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.read(sid, address, length, callback=callback)
         return f
 
