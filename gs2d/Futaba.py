@@ -275,11 +275,11 @@ class Futaba(Driver):
                 data = recv_data
 
         command = self.__generate_command(sid, address, flag=flag, count=0, length=length)
-        self.add_command_queue(command, recv_callback=temp_recv_callback)
+        self.add_command(command, recv_callback=temp_recv_callback)
 
         # コールバックが設定できていたら、コールバックに受信データを渡す
         if callback is None:
-            # X秒以内にサーボからデータを受信できたかをチェック
+            # 指定以内にサーボからデータを受信できたかをチェック
             start = time.time()
             while not is_received:
                 elapsed_time = time.time() - start
@@ -381,7 +381,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_TORQUE_ENABLE, [torque_data])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_temperature(self, sid, callback=None):
         """温度取得（単位: ℃。おおよそ±3℃程度の誤差あり）
@@ -509,7 +509,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_GOAL_POSITION_L, [position_hex_l, position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_current_position(self, sid, callback=None):
         """現在位置取得 (単位: 度)
@@ -641,7 +641,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_GOAL_TIME_L, [speed_hex_l, speed_hex_h])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_pid_coefficient(self, sid, callback=None):
         """モータの制御係数を取得 (単位: %)
@@ -702,7 +702,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_PID_COEFFICIENT, [coef_hex])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_max_torque(self, sid, callback=None):
         """最大トルク取得 (%)
@@ -760,7 +760,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_MAX_TORQUE, [torque_hex])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_speed(self, sid, callback=None):
         """現在の回転速度を取得 (deg/s)
@@ -856,7 +856,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_SERVO_ID, [new_sid_hex])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def save_rom(self, sid):
         """フラッシュROMに書き込む
@@ -872,7 +872,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_WRITE_FLASH_ROM, flag=0x40, count=0)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_baud_rate(self, sid, callback=None):
         """通信速度を取得
@@ -928,7 +928,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_BAUD_RATE, [baud_rate_id_hex])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_limit_cw_position(self, sid, callback=None):
         """右(時計回り)リミット角度の取得
@@ -987,7 +987,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_CW_ANGLE_LIMIT_L, [limit_position_hex_l, limit_position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_limit_ccw_position(self, sid, callback=None):
         """左(反時計回り)リミット角度の取得
@@ -1047,7 +1047,7 @@ class Futaba(Driver):
                                           [limit_position_hex_l, limit_position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_limit_temperature(self, sid, callback=None):
         """温度リミットの取得 (℃)
@@ -1115,7 +1115,7 @@ class Futaba(Driver):
         command = self.__generate_burst_command(self.ADDR_GOAL_POSITION_L, 3, vid_data)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def get_burst_positions(self, sids, callback=None):
         """複数のサーボの現在のポジションを一気にリード
@@ -1151,7 +1151,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_RESET_MEMORY, flag=self.FLAG4_RESET_MEMORY_MAP, count=0)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def read(self, sid, address, length, callback=None):
         """データを読み込む
@@ -1205,7 +1205,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, address, data)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)
 
     def burst_read(self, sid_address_length, callback=None):
         """複数サーボから一括でデータ読み取り
@@ -1248,4 +1248,4 @@ class Futaba(Driver):
         command = self.__generate_burst_command(address, length, vid_data)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.add_command(command)

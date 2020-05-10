@@ -1,8 +1,12 @@
+# ! /usr/bin/env python3
+# encoding: utf-8
+
 import platform
 import glob
 import serial
 import logging
 
+from .ISerialInterface import ISerialInterface
 from .Util import SerialDeviceNotFoundException
 
 # ロガー
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BAUDRATE = 115200
 
 
-class SerialInterface(object):
+class SerialInterface(ISerialInterface):
     __ser = None
 
     def __init__(self, device=None, baudrate=None):
@@ -57,6 +61,7 @@ class SerialInterface(object):
         :param data:
         :return:
         """
+
         return self.__ser.write(data)
 
     def readline(self):
@@ -64,6 +69,7 @@ class SerialInterface(object):
 
         :return:
         """
+
         return self.__ser.readline()
 
     def is_open(self):
@@ -71,6 +77,7 @@ class SerialInterface(object):
 
         :return:
         """
+
         return self.__ser.is_open
 
     def close(self):
@@ -78,4 +85,5 @@ class SerialInterface(object):
 
         :return:
         """
+
         self.__ser.close()

@@ -20,7 +20,7 @@ async def main(loop):
     si = SerialInterface(baudrate=3000000)
     dm = RobotisP20(si)
 
-    print(dm.ping(1))
+    # print(dm.ping(1))
 
     dm.set_torque_enable(True, sid=1)
 

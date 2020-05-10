@@ -4,13 +4,17 @@
 import time
 import logging
 
-from .Driver import Driver, RECEIVE_DATA_TIMEOUT_SEC
+from .ICommandHandler import ICommandHandler
+from .ISerialInterface import ISerialInterface
+from .Driver import Driver
 from .Util import ReceiveDataTimeoutException, NotSupportException, BadInputParametersException, WrongCheckSumException
 from .Util import InvalidResponseDataException
 from .Util import get_printable_hex
 
 # ロガー
 logger = logging.getLogger(__name__)
+
+RECEIVE_DATA_TIMEOUT_SEC = 19
 
 
 class RobotisP20(Driver):
@@ -109,11 +113,11 @@ class RobotisP20(Driver):
 
     STATUS_PACKET_INSTRUCTION = 0x55
 
-    def __init__(self, serial_interface):
+    def __init__(self, serial_interface: ISerialInterface, command_handler_class: ICommandHandler = None):
         """初期化
         """
 
-        super(RobotisP20, self).__init__(serial_interface)
+        super(RobotisP20, self).__init__(serial_interface, command_handler_class)
 
     def is_complete_response(self, response_data):
         """レスポンスデータをすべて受信できたかチェック"""
@@ -126,6 +130,16 @@ class RobotisP20(Driver):
             count = response_data[5]
             # logger.debug('###', count, len(response_data))
             return len(response_data) >= (7 + count)
+
+    def close(self, force=False):
+        """閉じる
+
+        :param force:
+        :return:
+        """
+
+        if self.command_handler:
+            self.command_handler.close()
 
     @staticmethod
     def __get_checksum(data):
@@ -304,57 +318,61 @@ class RobotisP20(Driver):
             nonlocal is_checksum_error
 
             # ステータスパケットのチェックサムが正しいかチェック
-            checksum = response[-2:]
-            generated_checksum = self.__get_checksum(response[:-2])
-            if checksum[0] != generated_checksum[0] or checksum[1] != generated_checksum[1]:
-                logger.debug('Check sum error: ' + get_printable_hex(response))
-                is_checksum_error = True
-                return
+            if len(response) > 2:
+                checksum = response[-2:]
+                generated_checksum = self.__get_checksum(response[:-2])
+                if checksum[0] != generated_checksum[0] or checksum[1] != generated_checksum[1]:
+                    logger.debug('Check sum error: ' + get_printable_hex(response))
+                    is_checksum_error = True
+                    return
 
-            # 受信済み
-            is_received = True
+                # 受信済み
+                is_received = True
 
-            if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
-                # TODO: ステータスパケット長エラーexception
-                return
+                if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
+                    # TODO: ステータスパケット長エラーexception
+                    return
 
-            # ステータスパケットからInstructionを取得し、0x55かチェック
-            status_packet_instruction = response[self.STATUS_PACKET_INSTRUCTION_INDEX]
-            if status_packet_instruction != self.STATUS_PACKET_INSTRUCTION:
-                # TODO: ステータスパケット異常exception
-                return
+                # ステータスパケットからInstructionを取得し、0x55かチェック
+                status_packet_instruction = response[self.STATUS_PACKET_INSTRUCTION_INDEX]
+                if status_packet_instruction != self.STATUS_PACKET_INSTRUCTION:
+                    # TODO: ステータスパケット異常exception
+                    return
 
-            # ステータスパケットからlengthを取得
-            status_packet_length = response[self.STATUS_PACKET_LENGTH_INDEX:self.STATUS_PACKET_LENGTH_INDEX + 2]
-            status_packet_length = int.from_bytes(status_packet_length, 'little', signed=True)
+                # ステータスパケットからlengthを取得
+                status_packet_length = response[self.STATUS_PACKET_LENGTH_INDEX:self.STATUS_PACKET_LENGTH_INDEX + 2]
+                status_packet_length = int.from_bytes(status_packet_length, 'little', signed=True)
 
-            if len(response) != self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
-                # TODO: ステータスパケット異常exception
-                return
+                if len(response) != self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
+                    # TODO: ステータスパケット異常exception
+                    return
 
-            # Errorバイト取得
-            status_packet_error = response[self.STATUS_PACKET_ERROR_INDEX]
+                # Errorバイト取得
+                status_packet_error = response[self.STATUS_PACKET_ERROR_INDEX]
 
-            if status_packet_error > 0:
-                # TODO: ステータスパケットエラーexception
-                return
+                if status_packet_error > 0:
+                    # TODO: ステータスパケットエラーexception
+                    return
 
-            # パラメータ取得
-            response_data = response[
-                            self.STATUS_PACKET_PARAMETER_INDEX:
-                            self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2
-                            ]
+                # パラメータ取得
+                response_data = response[
+                                self.STATUS_PACKET_PARAMETER_INDEX:
+                                self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2
+                                ]
 
-            # データ処理
-            recv_data = response_process(response_data)
+                # データ処理
+                recv_data = response_process(response_data)
 
-            if callback is not None:
-                callback(recv_data)
+                if callback is not None:
+                    callback(recv_data)
+                else:
+                    data = recv_data
             else:
-                data = recv_data
+                # TODO: 受信エラー
+                return
 
         command = self.__generate_command(sid, instruction, parameters, length=length)
-        self.add_command_queue(command, recv_callback=temp_recv_callback)
+        self.command_handler.add_command(command, recv_callback=temp_recv_callback)
 
         # コールバックが設定できていたら、コールバックに受信データを渡す
         if callback is None:
@@ -362,8 +380,10 @@ class RobotisP20(Driver):
             start = time.time()
             while not is_received:
                 elapsed_time = time.time() - start
-                if elapsed_time > RECEIVE_DATA_TIMEOUT_SEC:
-                    raise ReceiveDataTimeoutException(str(RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした')
+                if elapsed_time > self.command_handler.RECEIVE_DATA_TIMEOUT_SEC:
+                    raise ReceiveDataTimeoutException(
+                        str(self.command_handler.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした'
+                    )
                 elif is_checksum_error:
                     raise WrongCheckSumException('受信したデータのチェックサムが不正です')
 
@@ -463,7 +483,7 @@ class RobotisP20(Driver):
         command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.command_handler.add_command(command)
 
     def get_temperature(self, sid, callback=None):
         """温度取得（単位: ℃。おおよそ±3℃程度の誤差あり）
@@ -596,7 +616,7 @@ class RobotisP20(Driver):
         command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
 
         # データ送信バッファに追加
-        self.add_command_queue(command)
+        self.command_handler.add_command(command)
 
     def get_current_position(self, sid, callback=None):
         """現在位置取得 (単位: 度)
