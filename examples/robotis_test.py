@@ -40,6 +40,7 @@ async def main(loop):
         angle = i * 20 - 100
         print('Angle:', angle, 'deg')
         robotis.set_target_position(angle, sid=sid)
+        print('Target position:', robotis.get_target_position(sid))
         time.sleep(0.5)
 
     # クローズ

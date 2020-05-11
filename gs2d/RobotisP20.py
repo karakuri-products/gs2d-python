@@ -601,17 +601,20 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         # 単位は 0.1 度になっているので、度に変換
-        #         position = int.from_bytes(response_data, 'little', signed=True)
-        #         position /= 10
-        #         return position
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_GOAL_POSITION_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                # 単位は 0.1 度になっているので、度に変換
+                position = int.from_bytes(response_data, 'little', signed=True)
+                position = position * 360 / 4096
+                position = position - 180
+                return position
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_GOAL_POSITION, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_target_position_async(self, sid, loop=None):
         """指示位置取得 async版 (単位: 度)
@@ -645,18 +648,13 @@ class RobotisP20(Driver):
         # Dynamixelでは0〜360°なので変換
         position_degree += 180
 
-        # ポジションを4バイトデータに変換
-        position_data = self.get_bytes(position_degree * 4096 / 360, 4)
+        # データ変換
+        position_degree = position_degree * 4096 / 360
 
         # コマンド生成
-        address = self.get_bytes(self.ADDR_GOAL_POSITION, 2)
-        params = address + position_data
+        params = self.__generate_parameters_read_write(self.ADDR_GOAL_POSITION, position_degree, 4)
 
-        # コマンド生成
-        # params = self.__generate_parameters_read_write(self.ADDR_GOAL_POSITION, position_data, 2)
-
-        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid,
-                                   callback=self.__callback_write_response)
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_current_position(self, sid, callback=None):
         """現在位置取得 (単位: 度)
@@ -682,8 +680,7 @@ class RobotisP20(Driver):
         # コマンド生成
         params = self.__generate_parameters_read_write(self.ADDR_PRESENT_POSITION, 4, 2)
 
-        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid,
-                                   callback=callback)
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_current_position_async(self, sid, loop=None):
         """現在位置取得 async版 (単位: 度)
