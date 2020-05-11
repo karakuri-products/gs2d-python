@@ -285,7 +285,7 @@ class RobotisP20(Driver):
     #
     #     return command
 
-    def __get_function(self, instruction, parameters, response_process, sid=1, length=None, callback=None):
+    def __get_function(self, instruction, parameters, response_process=None, sid=1, length=None, callback=None):
         """Get系の処理をまとめた関数
 
         :param instruction:
@@ -313,7 +313,6 @@ class RobotisP20(Driver):
 
             # ステータスパケットのチェックサムが正しいかチェック
             if len(response) > 2:
-                print('$$$$$$$$$$$$', response, len(response))
                 # パラメーターindexまでデータがあるか
                 if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
                     # TODO: ステータスパケット長エラーexception
@@ -368,7 +367,10 @@ class RobotisP20(Driver):
                 is_received = True
 
                 # データ処理
-                recv_data = response_process(response_data)
+                if response_process:
+                    recv_data = response_process(response_data)
+                else:
+                    recv_data = response_data
 
                 if callback is not None:
                     callback(recv_data)
@@ -412,6 +414,18 @@ class RobotisP20(Driver):
         params.extend(self.get_bytes(data, data_size))
 
         return params
+
+    def __callback_write_response(self, response_data):
+        """WRITEインストラクション時の返り値ハンドリング
+
+        :param response_data:
+        :return:
+        """
+
+        # 返り値
+        if len(response_data) != 0:
+            # TODO: レスポンス以上exception
+            print('WRITEインストラクション返り値レスポンス以上exception')
 
     def ping(self, sid, callback=None):
         """サーボにPINGを送る
@@ -496,17 +510,19 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                return response_data[0] == 0x01
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
         # トルクデータ
         torque_data = 0x01 if on_off else 0x00
 
         # コマンド生成
-        address = self.get_bytes(self.ADDR_TORQUE_ENABLE, 2)
-        parameters = address + [torque_data]
+        params = self.__generate_parameters_read_write(self.ADDR_TORQUE_ENABLE, torque_data, 2)
 
-        command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
-
-        # データ送信バッファに追加
-        self.command_handler.add_command(command)
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_temperature(self, sid, callback=None):
         """温度取得（単位: ℃。おおよそ±3℃程度の誤差あり）
@@ -634,12 +650,13 @@ class RobotisP20(Driver):
 
         # コマンド生成
         address = self.get_bytes(self.ADDR_GOAL_POSITION, 2)
-        parameters = address + position_data
+        params = address + position_data
 
-        command = self.__generate_command(sid, self.INSTRUCTION_WRITE, parameters=parameters)
+        # コマンド生成
+        # params = self.__generate_parameters_read_write(self.ADDR_GOAL_POSITION, position_data, 2)
 
-        # データ送信バッファに追加
-        self.command_handler.add_command(command)
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid,
+                                   callback=self.__callback_write_response)
 
     def get_current_position(self, sid, callback=None):
         """現在位置取得 (単位: 度)
@@ -662,9 +679,11 @@ class RobotisP20(Driver):
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
+        # コマンド生成
         params = self.__generate_parameters_read_write(self.ADDR_PRESENT_POSITION, 4, 2)
 
-        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid,
+                                   callback=callback)
 
     def get_current_position_async(self, sid, loop=None):
         """現在位置取得 async版 (単位: 度)

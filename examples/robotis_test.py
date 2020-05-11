@@ -29,7 +29,9 @@ async def main(loop):
 
     time.sleep(0.5)
 
-    print('Enable Torque?:', robotis.get_torque_enable(sid=sid))
+    print('Current position:', robotis.get_current_position(sid))
+
+    # print('Enable Torque?:', robotis.get_torque_enable(sid=sid))
 
     # 0.5秒ごとにサーボを動かす
     for i in range(11):
