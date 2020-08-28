@@ -43,7 +43,7 @@ class DefaultCommandHandler(ICommandHandler):
     # レスポンスデータを受信完了したかをチェックする関数
     function_is_complete_response = None
 
-    def __init__(self, serial_interface: ISerialInterface, function_is_complete_response, buffer_size=None):
+    def __init__(self, serial_interface: ISerialInterface, function_is_complete_response, buffer_size=1024):
         """初期化
 
         :param serial_interface:

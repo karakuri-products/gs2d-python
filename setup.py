@@ -1,5 +1,6 @@
-import os, sys
+import os
 from setuptools import setup, find_packages
+
 
 def read_requirements():
     """Parse requirements from requirements.txt."""
@@ -8,6 +9,7 @@ def read_requirements():
         requirements = [line.rstrip() for line in f]
     return requirements
 
+
 setup(
     name='gs2d',
     version='0.0.2',
@@ -15,7 +17,7 @@ setup(
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     author='Karakuri Products',
-    author_email='dev@krkrpro.com',
+    author_email='gs2d@krkrpro.com',
     install_requires=read_requirements(),
     url='https://github.com/karakuri-products/gs2d-python',
     license='Apache License Version 2.0',

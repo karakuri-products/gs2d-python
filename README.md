@@ -14,9 +14,7 @@
 
 - 現在対応しているサーボモータ
     - FUTABA RS40x
-
-- もうすぐ対応するサーボモータ
-    - Dynamixel X
+    - Robotis Dynamixel (Protocol2.0)
 
 - 対応したいな、と思っているサーボモータ
     - KONDO KRS300x

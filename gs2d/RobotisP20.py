@@ -331,7 +331,7 @@ class RobotisP20(Driver):
                 status_packet_length = int.from_bytes(status_packet_length, 'little', signed=True)
 
                 if len(response) < self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
-                    print('FFFF', len(response), self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length)
+                    # print('FFFF', len(response), self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length)
                     # TODO: ステータスパケット異常exception
                     print('ステータスパケット異常exception ステータスパケットからlengthを取得')
                     print('########', response)
@@ -525,7 +525,7 @@ class RobotisP20(Driver):
         return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_temperature(self, sid, callback=None):
-        """温度取得（単位: ℃。おおよそ±3℃程度の誤差あり）
+        """現在の内部温度（単位: ℃）
 
         :param sid:
         :param callback:
@@ -535,15 +535,16 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         temperature = int.from_bytes(response_data, 'little', signed=True)
-        #         return temperature
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_TEMPERATURE_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                temperature = int.from_bytes(response_data, 'little', signed=True)
+                return temperature
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PRESENT_TEMPERATURE, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_temperature_async(self, sid, loop=None):
         """温度取得 async版（単位: ℃。おおよそ±3℃程度の誤差あり）
