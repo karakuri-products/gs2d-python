@@ -2,7 +2,7 @@ import asyncio
 import time
 import logging
 
-from .Driver import Driver, RECEIVE_DATA_TIMEOUT_SEC
+from .Driver import Driver
 from .Util import ReceiveDataTimeoutException, NotSupportException, BadInputParametersException, WrongCheckSumException
 from .Util import InvalidResponseDataException
 from .Util import get_printable_hex
@@ -10,6 +10,7 @@ from .Util import get_printable_hex
 # ロガー
 logger = logging.getLogger(__name__)
 
+RECEIVE_DATA_TIMEOUT_SEC = 19
 
 class Futaba(Driver):
     """Futabaのシリアルサーボクラス
@@ -283,8 +284,8 @@ class Futaba(Driver):
             start = time.time()
             while not is_received:
                 elapsed_time = time.time() - start
-                if elapsed_time > RECEIVE_DATA_TIMEOUT_SEC:
-                    raise ReceiveDataTimeoutException(str(RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした')
+                if elapsed_time > self.RECEIVE_DATA_TIMEOUT_SEC:
+                    raise ReceiveDataTimeoutException(str(self.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした')
                 elif is_checksum_error:
                     raise WrongCheckSumException('受信したデータのチェックサムが不正です')
 
