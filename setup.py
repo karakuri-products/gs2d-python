@@ -12,7 +12,7 @@ def read_requirements():
 
 setup(
     name='gs2d',
-    version='0.0.3',
+    version='0.0.4',
     description='gs2d: The Library for Generic Serial-bus Servo Driver kr-sac001 for Python',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
