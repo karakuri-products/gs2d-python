@@ -1,7 +1,8 @@
-import asyncio
 import time
 import logging
 
+from .ICommandHandler import ICommandHandler
+from .ISerialInterface import ISerialInterface
 from .Driver import Driver
 from .Util import ReceiveDataTimeoutException, NotSupportException, BadInputParametersException, WrongCheckSumException
 from .Util import InvalidResponseDataException
@@ -10,7 +11,6 @@ from .Util import get_printable_hex
 # ロガー
 logger = logging.getLogger(__name__)
 
-RECEIVE_DATA_TIMEOUT_SEC = 19
 
 class Futaba(Driver):
     """Futabaのシリアルサーボクラス
@@ -76,11 +76,11 @@ class Futaba(Driver):
     BAUD_RATE_INDEX_153600 = 0x08
     BAUD_RATE_INDEX_230400 = 0x09
 
-    def __init__(self, serial_interface):
+    def __init__(self, serial_interface: ISerialInterface, command_handler_class: ICommandHandler = None):
         """初期化
         """
 
-        super(Futaba, self).__init__(serial_interface)
+        super(Futaba, self).__init__(serial_interface, command_handler_class)
 
     def is_complete_response(self, response_data):
         """レスポンスデータをすべて受信できたかチェック"""
@@ -191,7 +191,7 @@ class Futaba(Driver):
         # Flag:    常に00
         # Address: メモリーマップ上のアドレスを指定します。
         #          このアドレスから「Length」に指定した長さ分のデータを指定した複数サーボのメモリーマップに書き込みます。
-        # Length:  サーボ1つ分のデータ (VID+Data) のバイト数を指定します。
+        # Length:  サーボ1つ分のデータ (VIDData) のバイト数を指定します。
         # Count:   データを送信する対象となるサーボの数を表します。この数分 VID と Data を送信します。
         # VID:     データを送信する個々のサーボの ID を表します。VID と Data が一組でサーボの数分のデータを送信します。
         # Data:    メモリーマップに書き込むサーボ一つ分のデータです。VID と Data が一組でサーボの数分のデータを送信します。
@@ -221,6 +221,7 @@ class Futaba(Driver):
         # Data
         for sid, data in vid_data_dict.items():
             command.append(sid)
+
             if data is not None and len(data) > 0:
                 command.extend(data)
 
@@ -276,7 +277,7 @@ class Futaba(Driver):
                 data = recv_data
 
         command = self.__generate_command(sid, address, flag=flag, count=0, length=length)
-        self.add_command(command, recv_callback=temp_recv_callback)
+        self.command_handler.add_command(command, recv_callback=temp_recv_callback)
 
         # コールバックが設定できていたら、コールバックに受信データを渡す
         if callback is None:
@@ -284,8 +285,8 @@ class Futaba(Driver):
             start = time.time()
             while not is_received:
                 elapsed_time = time.time() - start
-                if elapsed_time > self.RECEIVE_DATA_TIMEOUT_SEC:
-                    raise ReceiveDataTimeoutException(str(self.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした')
+                if elapsed_time > self.command_handler.RECEIVE_DATA_TIMEOUT_SEC:
+                    raise ReceiveDataTimeoutException(str(self.command_handler.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした')
                 elif is_checksum_error:
                     raise WrongCheckSumException('受信したデータのチェックサムが不正です')
 
@@ -321,9 +322,19 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_torque_enable(sid, callback=callback)
         return f
+
+    def close(self, force=False):
+        """閉じる
+
+        :param force:
+        :return:
+        """
+
+        if self.command_handler:
+            self.command_handler.close()
 
     def ping(self, sid, callback=None):
         """サーボにPINGを送る
@@ -336,21 +347,22 @@ class Futaba(Driver):
             'version_firmware': int (1byte)
         }
         """
-
-        # TODO: model_noとversion_firmwareをreadで一気に取得する方式に変更
-
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        if callback:
-            def inner_callback(_sid):
-                if callback:
-                    callback(_sid == sid)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 3:
+                model_no = int.from_bytes(response_data[0:2], 'little', signed=True)
+                version_firmware = response_data[2]
+                return {
+                    'model_no': model_no,
+                    'version_firmware': version_firmware
+                }
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
-            self.get_servo_id(sid, callback=inner_callback)
-        else:
-            servo_id = self.get_servo_id(sid)
-            return sid == servo_id
+        return self.__get_function(self.ADDR_MODEL_NUMBER_L, self.FLAG30_MEM_MAP_SELECT, 3, response_process,
+                                   sid=sid, callback=callback)
 
     def ping_async(self, sid, loop=None):
         """サーボにPINGを送る async版
@@ -360,7 +372,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.ping(sid, callback=callback)
         return f
 
@@ -382,7 +394,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_TORQUE_ENABLE, [torque_data])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_temperature(self, sid, callback=None):
         """温度取得（単位: ℃。おおよそ±3℃程度の誤差あり）
@@ -413,7 +425,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_temperature(sid, callback=callback)
         return f
 
@@ -446,7 +458,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_current(sid, callback=callback)
         return f
 
@@ -466,7 +478,7 @@ class Futaba(Driver):
                 # 単位は 0.1 度になっているので、度に変換
                 position = int.from_bytes(response_data, 'little', signed=True)
                 position /= 10
-                return position
+                return -position
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
@@ -481,12 +493,12 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_target_position(sid, callback=callback)
         return f
 
     def set_target_position(self, position_degree, sid=1):
-        """指示位置設定 (単位: 度。設定可能な範囲は-150.0 度~+150.0 度)
+        """指示位置設定 (単位: 度。設定可能な範囲は-150.0 度~150.0 度)
 
         :param position_degree:
         :param sid:
@@ -496,13 +508,13 @@ class Futaba(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # 設定可能な範囲は-150.0 度~+150.0 度
+        # 設定可能な範囲は-150.0 度~150.0 度
         if position_degree < -150:
             position_degree = -150
         elif position_degree > 150:
             position_degree = 150
 
-        position_hex = format(int(position_degree * 10) & 0xffff, '04x')
+        position_hex = format(int(position_degree * -10) & 0xffff, '04x')
         position_hex_h = int(position_hex[0:2], 16)
         position_hex_l = int(position_hex[2:4], 16)
 
@@ -510,7 +522,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_GOAL_POSITION_L, [position_hex_l, position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_current_position(self, sid, callback=None):
         """現在位置取得 (単位: 度)
@@ -528,7 +540,7 @@ class Futaba(Driver):
                 # 単位は 0.1 度になっているので、度に変換
                 position = int.from_bytes(response_data, 'little', signed=True)
                 position /= 10
-                return position
+                return -position
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
@@ -543,9 +555,27 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_current_position(sid, callback=callback)
         return f
+
+    def get_offset(self, sid, callback=None):
+        raise NotSupportException('Futabaではget_offsetに対応していません。')
+
+    def get_offset_async(self, sid, loop=None):
+        raise NotSupportException('Futabaではget_offset_asyncに対応していません。')
+
+    def set_offset(self, offset, sid):
+        raise NotSupportException('Futabaではset_offsetに対応していません。')
+
+    def get_deadband(self, sid, callback=None):
+        raise NotSupportException('Futabaではget_deadbandに対応していません。')
+
+    def get_deadband_async(self, sid, loop=None):
+        raise NotSupportException('Futabaではget_deadband_asyncに対応していません。')
+
+    def set_deadband(self, deadband, sid):
+        raise NotSupportException('Futabaではset_deadbandに対応していません。')
 
     def get_voltage(self, sid, callback=None):
         """電圧取得 (単位: V)
@@ -577,7 +607,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_voltage(sid, callback=callback)
         return f
 
@@ -612,8 +642,8 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
-        self.get_speed(sid, callback=callback)
+        f, callback = self.async_wrapper(loop)
+        self.get_target_time(sid, callback=callback)
         return f
 
     def set_target_time(self, speed_second, sid=1):
@@ -642,7 +672,16 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_GOAL_TIME_L, [speed_hex_l, speed_hex_h])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
+
+    def get_accel_time(self, sid, callback=None):
+        raise NotSupportException('Futabaではget_accel_timeに対応していません。')
+
+    def get_accel_time_async(self, sid, loop=None):
+        raise NotSupportException('Futabaではget_accel_time_asyncに対応していません。')
+
+    def set_accel_time(self, speed_second, sid):
+        raise NotSupportException('Futabaではset_accel_timeに対応していません。')
 
     def get_pid_coefficient(self, sid, callback=None):
         """モータの制御係数を取得 (単位: %)
@@ -673,7 +712,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_pid_coefficient(sid, callback=callback)
         return f
 
@@ -703,7 +742,101 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_PID_COEFFICIENT, [coef_hex])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
+
+    def get_p_gain(self, sid, callback=None):
+        """ pGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_p_gainに対応していません。')
+
+    def get_p_gain_async(self, sid, loop=None):
+        """ pGainの取得（単位無し async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_p_gain_asyncに対応していません。')
+
+    def set_p_gain(self, gain, sid=1):
+        """ pGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではset_p_gainに対応していません。')
+
+
+    def get_i_gain(self, sid, callback=None):
+        """ iGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_i_gainに対応していません。')
+
+
+    def get_i_gain_async(self, sid, loop=None):
+        """ iGainの取得（単位無し async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_i_gain_asyncに対応していません。')
+
+    def set_i_gain(self, gain, sid=1):
+        """ iGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではset_i_gainに対応していません。')
+
+
+    def get_d_gain(self, sid, callback=None):
+        """ dGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_d_gainに対応していません。')
+
+
+    def get_d_gain_async(self, sid, loop=None):
+        """ dGainの取得（単位無し async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_d_gain_asyncに対応していません。')
+
+    def set_d_gain(self, gain, sid=1):
+        """ dGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではset_d_gainに対応していません。')
 
     def get_max_torque(self, sid, callback=None):
         """最大トルク取得 (%)
@@ -734,7 +867,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_max_torque(sid, callback=callback)
         return f
 
@@ -761,7 +894,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_MAX_TORQUE, [torque_hex])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_speed(self, sid, callback=None):
         """現在の回転速度を取得 (deg/s)
@@ -792,7 +925,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_speed(sid, callback=callback)
         return f
 
@@ -829,7 +962,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_servo_id(sid, callback=callback)
         return f
 
@@ -857,7 +990,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_SERVO_ID, [new_sid_hex])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def save_rom(self, sid):
         """フラッシュROMに書き込む
@@ -873,7 +1006,10 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_WRITE_FLASH_ROM, flag=0x40, count=0)
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
+
+    def load_rom(self, sid):
+        raise NotSupportException('Futabaではload_romに対応していません。')
 
     def get_baud_rate(self, sid, callback=None):
         """通信速度を取得
@@ -888,8 +1024,9 @@ class Futaba(Driver):
 
         def response_process(response_data):
             if response_data is not None and len(response_data) == 1:
-                baud_rate = int.from_bytes(response_data, 'little', signed=False)
-                return baud_rate
+                baud_rate_list = [9600, 14400, 19200, 28800, 38400, 57600, 76800, 115200, 153600, 230400]
+                baud_rate_id = int.from_bytes(response_data, 'little', signed=False)
+                return baud_rate_list[baud_rate_id]
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
@@ -904,14 +1041,14 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_baud_rate(sid, callback=callback)
         return f
 
-    def set_baud_rate(self, baud_rate_id, sid):
+    def set_baud_rate(self, baud_rate, sid):
         """通信速度を設定
 
-        :param baud_rate_id:
+        :param baud_rate:
         :param sid:
         :return:
         """
@@ -920,8 +1057,11 @@ class Futaba(Driver):
         self.__check_sid(sid)
 
         # 通信速度IDのチェック
-        if self.BAUD_RATE_INDEX_9600 < baud_rate_id > self.BAUD_RATE_INDEX_230400:
-            raise BadInputParametersException('baud_rate_id が不正な値です')
+        baud_rate_list = [9600, 14400, 19200, 28800, 38400, 57600, 76800, 115200, 153600, 230400]
+        try:
+            baud_rate_id = baud_rate_list.index(baud_rate)
+        except:
+            raise BadInputParametersException('baud_rate が不正な値です')
 
         baud_rate_id_hex = int(baud_rate_id)
 
@@ -929,7 +1069,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_BAUD_RATE, [baud_rate_id_hex])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_limit_cw_position(self, sid, callback=None):
         """右(時計回り)リミット角度の取得
@@ -946,7 +1086,7 @@ class Futaba(Driver):
             if response_data is not None and len(response_data) == 2:
                 limit_position = int.from_bytes(response_data, 'little', signed=True)
                 limit_position /= 10
-                return limit_position
+                return -limit_position
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
@@ -961,7 +1101,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_cw_position(sid, callback=callback)
         return f
 
@@ -977,8 +1117,10 @@ class Futaba(Driver):
         self.__check_sid(sid)
 
         # リミット角度のチェック
-        if 0 < limit_position > 150:
-            raise BadInputParametersException('limit_position が不正な値です。0〜+150を設定してください。')
+        if -150 < limit_position > 0:
+            raise BadInputParametersException('limit_position が不正な値です。-150〜0を設定してください。')
+
+        limit_position = -limit_position;
 
         limit_position_hex = format(int(limit_position * 10) & 0xffff, '04x')
         limit_position_hex_h = int(limit_position_hex[0:2], 16)
@@ -988,7 +1130,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_CW_ANGLE_LIMIT_L, [limit_position_hex_l, limit_position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_limit_ccw_position(self, sid, callback=None):
         """左(反時計回り)リミット角度の取得
@@ -1005,7 +1147,7 @@ class Futaba(Driver):
             if response_data is not None and len(response_data) == 2:
                 limit_position = int.from_bytes(response_data, 'little', signed=True)
                 limit_position /= 10
-                return limit_position
+                return -limit_position
             else:
                 raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
@@ -1020,7 +1162,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_ccw_position(sid, callback=callback)
         return f
 
@@ -1036,10 +1178,12 @@ class Futaba(Driver):
         self.__check_sid(sid)
 
         # リミット角度のチェック
-        if -150 < limit_position > 0:
-            raise BadInputParametersException('limit_position が不正な値です。-150〜0を設定してください。')
+        if 0 < limit_position > 150:
+            raise BadInputParametersException('limit_position が不正な値です。0〜150を設定してください。')
 
-        limit_position_hex = format(int(limit_position * 10 & 0xffff), '04x')
+        limit_position = -limit_position;
+
+        limit_position_hex = format(int((limit_position * 10) & 0xffff), '04x')
         limit_position_hex_h = int(limit_position_hex[0:2], 16)
         limit_position_hex_l = int(limit_position_hex[2:4], 16)
 
@@ -1048,7 +1192,7 @@ class Futaba(Driver):
                                           [limit_position_hex_l, limit_position_hex_h])
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_limit_temperature(self, sid, callback=None):
         """温度リミットの取得 (℃)
@@ -1079,13 +1223,36 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.get_limit_temperature(sid, callback=callback)
         return f
 
     def set_limit_temperature(self, limit_temp, sid):
         """Futabaでは未サポート"""
         raise NotSupportException('Futabaではset_limit_temperatureに対応していません。')
+
+    def get_limit_current(self, sid, callback=None):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_limit_currentに対応していません。')
+
+    def get_limit_current_async(self, sid, loop=None):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_limit_current_asyncに対応していません。')
+
+    def set_limit_current(self, limit_current, sid):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではset_limit_currentに対応していません。')
+
+    def get_drive_mode(self, sid, callback=None):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_drive_modeに対応していません。')
+    def get_drive_mode_async(self, sid, loop=None):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではget_drive_mode_asyncに対応していません。')
+    def set_drive_mode(self, drive_mode, sid):
+        """Futabaでは未サポート"""
+        raise NotSupportException('Futabaではset_drive_modeに対応していません。')
+
 
     def set_burst_target_positions(self, sid_target_positions):
         """複数のサーボの対象ポジションを一度に設定
@@ -1100,13 +1267,13 @@ class Futaba(Driver):
             # サーボIDのチェック
             self.__check_sid(sid)
 
-            # 設定可能な範囲は-150.0 度~+150.0 度
+            # 設定可能な範囲は-150.0 度~150.0 度
             if position_degree < -150:
                 position_degree = -150
             elif position_degree > 150:
                 position_degree = 150
 
-            position_hex = format(int(position_degree * 10) & 0xffff, '04x')
+            position_hex = format(int(position_degree * -10) & 0xffff, '04x')
             position_hex_h = int(position_hex[0:2], 16)
             position_hex_l = int(position_hex[2:4], 16)
 
@@ -1116,7 +1283,7 @@ class Futaba(Driver):
         command = self.__generate_burst_command(self.ADDR_GOAL_POSITION_L, 3, vid_data)
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def get_burst_positions(self, sids, callback=None):
         """複数のサーボの現在のポジションを一気にリード
@@ -1152,7 +1319,7 @@ class Futaba(Driver):
         command = self.__generate_command(sid, self.ADDR_RESET_MEMORY, flag=self.FLAG4_RESET_MEMORY_MAP, count=0)
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
     def read(self, sid, address, length, callback=None):
         """データを読み込む
@@ -1186,7 +1353,7 @@ class Futaba(Driver):
         :return:
         """
 
-        f, callback = self.__async_wrapper(loop)
+        f, callback = self.async_wrapper(loop)
         self.read(sid, address, length, callback=callback)
         return f
 
@@ -1206,22 +1373,26 @@ class Futaba(Driver):
         command = self.__generate_command(sid, address, data)
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)
 
-    def burst_read(self, sid_address_length, callback=None):
+    def burst_read(self, address, length, sids, callback=None):
         """複数サーボから一括でデータ読み取り
 
-        :param sid_address_length:
+        :param address:
+        :param length:
+        :param sids:
         :param callback:
         :return:
         """
         """Futabaでは未サポート"""
         raise NotSupportException('Futabaではburst_readに対応していません。')
 
-    def burst_read_async(self, sid_address_length, loop=None):
+    def burst_read_async(self, address, length, sids, loop=None):
         """複数サーボから一括でデータ読み取り async版
 
-        :param sid_address_length:
+        :param address:
+        :param length:
+        :param sids:
         :param loop:
         :return:
         """
@@ -1249,4 +1420,4 @@ class Futaba(Driver):
         command = self.__generate_burst_command(address, length, vid_data)
 
         # データ送信バッファに追加
-        self.add_command(command)
+        self.command_handler.add_command(command)

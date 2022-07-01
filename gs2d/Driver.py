@@ -98,7 +98,7 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def get_torque_enable(self, sid, loop=None):
+    def get_torque_enable(self, sid, callback=None):
         raise NotImplementedError()
 
     @abstractmethod
@@ -154,6 +154,30 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
+    def get_offset(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_offset_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_offset(self, offset, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_deadband(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_deadband(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_deadband(self, deadband, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
     def get_target_time(self, sid, callback=None):
         raise NotImplementedError()
 
@@ -166,6 +190,18 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
+    def get_accel_time(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_accel_time_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_accel_time(self, speed_second, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
     def get_pid_coefficient(self, sid, callback=None):
         raise NotImplementedError()
 
@@ -175,6 +211,42 @@ class Driver(metaclass=ABCMeta):
 
     @abstractmethod
     def set_pid_coefficient(self, coef_percent, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_p_gain(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_p_gain_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_p_gain(self, gain, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_i_gain(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_i_gain_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_i_gain(self, gain, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_d_gain(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_d_gain_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_d_gain(self, gain, sid):
         raise NotImplementedError()
 
     @abstractmethod
@@ -218,6 +290,14 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
+    def load_rom(self, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def reset_memory(self, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
     def get_baud_rate(self, sid, callback=None):
         raise NotImplementedError()
 
@@ -226,7 +306,7 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def set_baud_rate(self, baud_rate_id, sid):
+    def set_baud_rate(self, baud_rate, sid):
         raise NotImplementedError()
 
     @abstractmethod
@@ -270,15 +350,35 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
+    def get_limit_current(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_limit_current_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_limit_current(self, limit_current, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_drive_mode(self, sid, callback=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_drive_mode_async(self, sid, loop=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_drive_mode(self, drive_mode, sid):
+        raise NotImplementedError()
+
+    @abstractmethod
     def get_burst_positions(self, sids, callback=None):
         raise NotImplementedError()
 
     @abstractmethod
     def get_burst_positions_async(self, sids, loop=None):
-        raise NotImplementedError()
-
-    @abstractmethod
-    def reset_memory(self, sid):
         raise NotImplementedError()
 
     @abstractmethod
@@ -294,11 +394,11 @@ class Driver(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def burst_read(self, sid_address_length, callback=None):
+    def burst_read(self, address, length, sids, callback=None):
         raise NotImplementedError()
 
     @abstractmethod
-    def burst_read_async(self, sid_address_length, loop=None):
+    def burst_read_async(self, address, length, sids, loop=None):
         raise NotImplementedError()
 
     @abstractmethod

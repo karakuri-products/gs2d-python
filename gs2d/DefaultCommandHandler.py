@@ -7,7 +7,7 @@ import logging
 from collections import deque
 from .ICommandHandler import ICommandHandler
 from .ISerialInterface import ISerialInterface
-from .Util import CommandBufferOverflowException, NotEnablePollingCommandException, get_printable_hex
+from .Util import ReceiveDataTimeoutException, CommandBufferOverflowException, NotEnablePollingCommandException, get_printable_hex
 
 # ロガー
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ class DefaultCommandHandler(ICommandHandler):
 
         self.serial_interface = serial_interface
 
-    def __send_command(self, data, recv_callback=None):
+    def __send_command(self, data, recv_callback=None, count=1):
         """実際にコマンド送信バッファの中から取り出したコマンドを送信する
 
         :param data:
@@ -94,24 +94,29 @@ class DefaultCommandHandler(ICommandHandler):
             logger.debug('Sent data: ' + get_printable_hex(byte_data))
 
             if recv_callback is not None:
-                start = time.time()
+                while count != 0:
+                    start = time.time()
 
-                # データを受信する
-                response = self.serial_interface.read()
+                    # データを受信する
+                    response = self.serial_interface.read()
 
-                # データが完全に受信できていないのであれば更に受信する
-                while not self.function_is_complete_response(response):
-                    response += self.serial_interface.read()
+                    # データが完全に受信できていないのであれば更に受信する
+                    while not self.function_is_complete_response(response):
+                        response += self.serial_interface.read()
 
-                    # タイムアウトチェック
-                    elapsed_time = time.time() - start
-                    if elapsed_time > self.RECEIVE_DATA_TIMEOUT_SEC:
-                        break
+                        # タイムアウトチェック
+                        elapsed_time = time.time() - start
+                        if elapsed_time > self.RECEIVE_DATA_TIMEOUT_SEC:
+                            raise ReceiveDataTimeoutException(str(self.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータを受信できませんでした')
+                            break
 
-                logger.debug('Response data: ' + get_printable_hex(response))
+                    logger.debug('Response data: ' + get_printable_hex(response))
 
-                # 別スレッドでコールバックを呼ぶ（コールバックでcloseされたりとかもするので）
-                threading.Thread(target=recv_callback, args=(response,)).start()
+                    # 別スレッドでコールバックを呼ぶ（コールバックでcloseされたりとかもするので）
+                    threading.Thread(target=recv_callback, args=(response,)).start()
+
+                    # 受信サーボ数を一つ減らす
+                    count = count - 1;
 
     def __polling_command_queue(self):
         """コマンド送信バッファの監視スレッドで動作する関数
@@ -123,9 +128,9 @@ class DefaultCommandHandler(ICommandHandler):
         while self.enable_polling or (not self.close_force and len(self.command_queue) > 0):
             if len(self.command_queue) > 0:
                 command = self.command_queue.pop()
-                self.__send_command(command['data'], command['recv_callback'])
+                self.__send_command(command['data'], command['recv_callback'], command['count'])
 
-    def add_command(self, data, recv_callback=None):
+    def add_command(self, data, recv_callback=None, count=1):
         """送信するコマンドを送信バッファに追加する
 
         :param data:
@@ -140,7 +145,8 @@ class DefaultCommandHandler(ICommandHandler):
                 raise NotEnablePollingCommandException('コマンドバッファのポーリング終了後にコマンド追加はできません')
             command_data = {
                 'data': data,
-                'recv_callback': recv_callback
+                'recv_callback': recv_callback,
+                'count' : count
             }
             self.command_queue.insert(0, command_data)
             # logger.debug('Command data: ' + str(command_data))

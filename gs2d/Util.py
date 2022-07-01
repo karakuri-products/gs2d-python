@@ -9,7 +9,6 @@ class NotSupportException(IOError):
 class SerialDeviceNotFoundException(SerialServoDriverException):
     """シリアルデバイスが見つからないException"""
 
-
 class ReceiveDataTimeoutException(SerialServoDriverException):
     """データ受信タイムアウトException"""
 

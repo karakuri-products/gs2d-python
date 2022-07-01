@@ -315,15 +315,14 @@ class RobotisP20(Driver):
             if len(response) > 2:
                 # パラメーターindexまでデータがあるか
                 if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
-                    # TODO: ステータスパケット長エラーexception
-                    print('ステータスパケット長エラーexception')
+                    raise InvalidResponseDataException("ステータスパケット長が不正です")
                     return
 
                 # ステータスパケットからInstructionを取得し、0x55かチェック
                 status_packet_instruction = response[self.STATUS_PACKET_INSTRUCTION_INDEX]
                 if status_packet_instruction != self.STATUS_PACKET_INSTRUCTION:
                     # TODO: ステータスパケット異常exception
-                    print('ステータスパケット異常exception ステータスパケットからInstructionを取得し、0x55かチェック')
+                    raise InvalidResponseDataException("ステータスパケットのInstructionが不正です")
                     return
 
                 # ステータスパケットからlengthを取得
@@ -333,8 +332,7 @@ class RobotisP20(Driver):
                 if len(response) < self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
                     # print('FFFF', len(response), self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length)
                     # TODO: ステータスパケット異常exception
-                    print('ステータスパケット異常exception ステータスパケットからlengthを取得')
-                    print('########', response)
+                    raise InvalidResponseDataException("ステータスパケットの長さが不正です")
                     return
 
                 # Errorバイト取得
@@ -342,7 +340,7 @@ class RobotisP20(Driver):
 
                 if status_packet_error > 0:
                     # TODO: ステータスパケットエラーexception
-                    print('ステータスパケットエラーexception')
+                    raise InvalidResponseDataException("ステータスパケットが不正です")
                     return
 
                 # パラメータ取得
@@ -400,6 +398,157 @@ class RobotisP20(Driver):
         else:
             return True
 
+    def  __get_function_burstread(self, instruction, parameters, sid, num, response_process=None, length=None, callback=None):
+        """Get系の処理をまとめた関数
+
+        :param instruction:
+        :param parameters:
+        :param sid:
+        :param num:
+        :param response_process:
+        :param length:
+        :param callback:
+        :return:
+        """
+
+        data = None
+        data_list = []
+
+        # 受信済みフラグ
+        is_received = False
+        received_num = 0
+
+        # チェックサム不正エラー
+        is_checksum_error = False
+
+        def temp_recv_callback(response):
+            nonlocal data
+            nonlocal data_list
+            nonlocal is_received
+            nonlocal received_num
+            nonlocal is_checksum_error
+
+            # ステータスパケットのチェックサムが正しいかチェック
+            if len(response) > 2:
+                # パラメーターindexまでデータがあるか
+                if len(response) <= self.STATUS_PACKET_PARAMETER_INDEX:
+                    raise InvalidResponseDataException("ステータスパケット長が不正です")
+                    return
+
+                # ステータスパケットからInstructionを取得し、0x55かチェック
+                status_packet_instruction = response[self.STATUS_PACKET_INSTRUCTION_INDEX]
+                if status_packet_instruction != self.STATUS_PACKET_INSTRUCTION:
+                    raise InvalidResponseDataException("ステータスパケットが不正です")
+                    return
+
+                # ステータスパケットからlengthを取得
+                status_packet_length = response[self.STATUS_PACKET_LENGTH_INDEX:self.STATUS_PACKET_LENGTH_INDEX + 2]
+                status_packet_length = int.from_bytes(status_packet_length, 'little', signed=True)
+
+                if len(response) < self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length:
+                    # print('FFFF', len(response), self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length)
+                    raise InvalidResponseDataException("ステータスパケットが不正です")
+                    return
+
+                # Errorバイト取得
+                status_packet_error = response[self.STATUS_PACKET_ERROR_INDEX]
+
+                if status_packet_error > 0:
+                    raise InvalidResponseDataException("ステータスパケットが不正です")
+                    return
+
+                # パラメータ取得
+                response_data = response[
+                                self.STATUS_PACKET_PARAMETER_INDEX:
+                                self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2
+                                ]
+
+                # チェックサム検証
+                checksum = response[
+                           self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2:
+                           self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length]
+                generated_checksum = self.__get_checksum(
+                    response[:self.STATUS_PACKET_INSTRUCTION_INDEX + status_packet_length - 2]
+                )
+                if checksum[0] != generated_checksum[0] or checksum[1] != generated_checksum[1]:
+                    logger.debug('Check sum error: ' + get_printable_hex(response))
+                    is_checksum_error = True
+                    return
+
+                # データ処理
+                if response_process:
+                    recv_data = response_process(response_data)
+                else:
+                    recv_data = response_data
+
+                data_list.append({'id':response[4], 'data':recv_data })
+
+                received_num = received_num + 1
+
+                if received_num == num:
+                    # 受信済み
+                    is_received = True
+
+                    if callback is not None:
+                        callback(data_list)
+                    else:
+                        data = data_list
+            else:
+                # TODO: 受信エラー
+                return
+
+        command = self.__generate_command(sid, instruction, parameters, length=length)
+        self.command_handler.add_command(command, recv_callback=temp_recv_callback, count=num)
+
+        # コールバックが設定できていたら、コールバックに受信データを渡す
+        if callback is None:
+            # X秒以内にサーボからデータを受信できたかをチェック
+            start = time.time()
+            while not is_received:
+                elapsed_time = time.time() - start
+                if elapsed_time > self.command_handler.RECEIVE_DATA_TIMEOUT_SEC:
+                    raise ReceiveDataTimeoutException(
+                        str(self.command_handler.RECEIVE_DATA_TIMEOUT_SEC) + '秒以内にデータ受信できませんでした'
+                    )
+                elif is_checksum_error:
+                    raise WrongCheckSumException('受信したデータのチェックサムが不正です')
+
+            return data
+        else:
+            return True
+
+    def __generate_parameters_sync_read(self, start_address, length, data_list=None):
+        """Sync Readのパラメータを生成する
+
+        :param start_address:
+        :param length:
+        :param data_list:
+        :return:
+        """
+        params = []
+        params.extend(self.get_bytes(start_address, 2))
+        params.extend(self.get_bytes(length, 2))
+        if data_list is not None:
+            params.extend(data_list)
+        return params
+
+    def __generate_parameters_sync_write(self, start_address, length, data_list=None):
+        """Sync Writeのパラメータを生成する
+
+        :param start_address:
+        :param length:
+        :param data_list:
+        :return:
+        """
+        params = []
+        params.extend(self.get_bytes(start_address, 2))
+        params.extend(self.get_bytes(length, 2))
+        if data_list is not None:
+            for i in range(0, len(data_list), 2):
+                params.extend(self.get_bytes(data_list[i], 1))
+                params.extend(self.get_bytes(data_list[i + 1], length))
+        return params
+
     def __generate_parameters_read_write(self, start_address, data, data_size):
         """Read/Write系のパラメータを生成する
 
@@ -424,8 +573,7 @@ class RobotisP20(Driver):
 
         # 返り値
         if len(response_data) != 0:
-            # TODO: レスポンス以上exception
-            print('WRITEインストラクション返り値レスポンス以上exception')
+            raise InvalidResponseDataException("Writeの返り値が多すぎます")
 
     def ping(self, sid, callback=None):
         """サーボにPINGを送る
@@ -443,7 +591,7 @@ class RobotisP20(Driver):
 
         def response_process(response_data):
             if response_data is not None and len(response_data) == 3:
-                model_no = response_data[0:2]
+                model_no = int.from_bytes(response_data[0:2], 'little', signed=True)
                 version_firmware = response_data[2]
                 return {
                     'model_no': model_no,
@@ -569,15 +717,16 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         current = int.from_bytes(response_data, 'little', signed=False)
-        #         return current
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_PRESENT_CURRENT_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                current = int.from_bytes(response_data, 'little', signed = True) * 2.69
+                return current
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PRESENT_CURRENT, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_current_async(self, sid, loop=None):
         """電流(現在の負荷)取得 async版 (単位: mA)
@@ -695,6 +844,76 @@ class RobotisP20(Driver):
         self.get_current_position(sid, callback=callback)
         return f
 
+    def get_offset(self, sid, callback=None):
+        """オフセット角度取得 (単位: 度)
+
+        :param sid:
+        :param callback:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                # 単位は 0.1 度になっているので、度に変換
+                offset = int.from_bytes(response_data, 'little', signed=True)
+                offset = offset * 0.088
+                return offset
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_HOMING_OFFSET, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_offset_async(self, sid, loop=None):
+        """オフセット角度取得 async版 (単位: 度)
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.async_wrapper(loop)
+        self.get_offset(sid, callback=callback)
+        return f
+
+    def set_offset(self, offset, sid):
+        """オフセット角度指定 (単位: 度)
+
+        :param offset:
+        :param sid:
+        :return:
+        """
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        # データ変換
+        offset = offset / 0.088
+
+        if offset < -1044479:
+            offset = -1044479
+        elif offset > 1044479:
+            offset = 1044479
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_HOMING_OFFSET, offset, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_deadband(self, sid, callback=None):
+        raise NotSupportException('RobotisP20ではget_deadbandに対応していません。')
+
+    def get_deadband_async(self, sid, loop=None):
+        raise NotSupportException('RobotisP20ではget_deadband_asyncに対応していません。')
+
+    def set_deadband(self, deadband, sid):
+        raise NotSupportException('RobotisP20ではset_deadbandに対応していません。')
+
+
     def get_voltage(self, sid, callback=None):
         """電圧取得 (単位: V)
 
@@ -706,16 +925,18 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         voltage = int.from_bytes(response_data, 'little', signed=True)
-        #         voltage /= 100
-        #         return voltage
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_VOLTAGE_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                voltage = int.from_bytes(response_data, 'little', signed=True)
+                voltage = voltage / 10
+                return voltage
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_PRESENT_INPUT_VOLTAGE, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_voltage_async(self, sid, loop=None):
         """電圧取得 async版 (単位: V)
@@ -740,17 +961,17 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         # 単位は 10ms 単位になっているので、秒に変更
-        #         speed = int.from_bytes(response_data, 'little', signed=False)
-        #         speed /= 100
-        #         return speed
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_GOAL_TIME_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                target_time = int.from_bytes(response_data, 'little', signed = False)
+                target_time = target_time / 1000.0
+                return target_time
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_VELOCITY, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_target_time_async(self, sid, loop=None):
         """目標位置までのサーボ移動時間を取得 async版 (単位: 秒)
@@ -761,7 +982,7 @@ class RobotisP20(Driver):
         """
 
         f, callback = self.async_wrapper(loop)
-        self.get_speed(sid, callback=callback)
+        self.get_target_time(sid, callback=callback)
         return f
 
     def set_target_time(self, speed_second, sid):
@@ -775,22 +996,74 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # 設定範囲は 0 から 3FFFH。つまり0秒から163830ms=163.83seconds
-        # if speed_second < 0:
-        #     speed_second = 0
-        # elif speed_second > 163.83:
-        #     speed_second = 163.83
-        #
-        # # 10ms 単位で設定。この関数のパラメータは秒指定なので*100する
-        # speed_hex = format(int(speed_second * 100) & 0xffff, '04x')
-        # speed_hex_h = int(speed_hex[0:2], 16)
-        # speed_hex_l = int(speed_hex[2:4], 16)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_GOAL_TIME_L, [speed_hex_l, speed_hex_h])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        if speed_second < 0:
+            speed_second = 0
+        elif speed_second > 32.737:
+            speed_second = 32.737
+
+        speed_second *= 1000
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_VELOCITY, speed_second, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_accel_time(self, sid, callback=None):
+        """目標位置までのサーボ加速時間を取得 (単位: 秒)
+
+        :param sid:
+        :param callback:
+        :return:
+        """
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                speed = int.from_bytes(response_data, 'little', signed = False)
+                speed = speed / 1000.0
+                return speed
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_ACCELERATION, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_accel_time_async(self, sid, loop=None):
+        """目標位置までのサーボ加速時間を取得 async版 (単位: 秒)
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.async_wrapper(loop)
+        self.get_accel_time(sid, callback=callback)
+        return f
+
+    def set_accel_time(self, speed_second, sid):
+        """目標位置までのサーボ加速時間を設定 (単位: 秒)
+
+        :param speed_second:
+        :param sid:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        if speed_second < 0:
+            speed_second = 0
+        elif speed_second > 32.737:
+            speed_second = 32.737
+
+        speed_second *= 1000
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_ACCELERATION, speed_second, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_pid_coefficient(self, sid, callback=None):
         """モータの制御係数を取得 (単位: %)
@@ -799,19 +1072,7 @@ class RobotisP20(Driver):
         :param callback:
         :return:
         """
-
-        # サーボIDのチェック
-        self.__check_sid(sid)
-
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 1:
-        #         coef = response_data[0]
-        #         return coef
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_PID_COEFFICIENT, self.FLAG30_MEM_MAP_SELECT, 1, response_process,
-        #                            sid=sid, callback=callback)
+        raise NotSupportException('RobotisP20ではget_pid_coefficientに対応していません。')
 
     def get_pid_coefficient_async(self, sid, loop=None):
         """モータの制御係数を取得 async版 (単位: %)
@@ -820,10 +1081,7 @@ class RobotisP20(Driver):
         :param loop:
         :return:
         """
-
-        f, callback = self.async_wrapper(loop)
-        self.get_pid_coefficient(sid, callback=callback)
-        return f
+        raise NotSupportException('RobotisP20ではget_pid_coefficient_asyncに対応していません。')
 
     def set_pid_coefficient(self, coef_percent, sid):
         """モータの制御係数を設定 (単位: %)
@@ -832,26 +1090,172 @@ class RobotisP20(Driver):
         :param sid:
         :return:
         """
+        raise NotSupportException('RobotisP20ではset_pid_coefficientに対応していません。PIDゲインを個別に設定してください。')
+
+    def get_p_gain(self, sid, callback=None):
+        """ pGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
 
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # 100%のとき設定値は、64H となります。設定範囲は 01H~FFH までです。
-        # if coef_percent < 1:
-        #     coef_percent = 1
-        # elif coef_percent == 10:
-        #     # なぜか10に設定すると反応がおかしいので9にシフトさせる
-        #     coef_percent = 9
-        # elif coef_percent > 255:
-        #     coef_percent = 255
-        #
-        # coef_hex = int(coef_percent)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_PID_COEFFICIENT, [coef_hex])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                pGain = int.from_bytes(response_data, 'little', signed = False)
+                return pGain
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_P_GAIN, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_p_gain_async(self, sid, loop=None):
+        """ pGainの取得（単位無し
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        f, callback = self.async_wrapper(loop)
+        self.get_p_gain(sid, callback=callback)
+        return f
+
+    def set_p_gain(self, gain, sid=1):
+        """ pGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        # 位置 (-180から180まで)
+        if gain < 0:
+            gain = 0
+        elif gain > 16383:
+            gain = 16383
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_P_GAIN, gain, 2)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_i_gain(self, sid, callback=None):
+        """ iGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                pGain = int.from_bytes(response_data, 'little', signed = False)
+                return pGain
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_I_GAIN, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_i_gain_async(self, sid, loop=None):
+        """ iGainの取得（単位無し
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        f, callback = self.async_wrapper(loop)
+        self.get_i_gain(sid, callback=callback)
+        return f
+
+    def set_i_gain(self, gain, sid=1):
+        """ iGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        # 位置 (-180から180まで)
+        if gain < 0:
+            gain = 0
+        elif gain > 16383:
+            gain = 16383
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_I_GAIN, gain, 2)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_d_gain(self, sid, callback=None):
+        """ dGainの取得（単位無し
+
+        :param sid:
+        :param callback
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                pGain = int.from_bytes(response_data, 'little', signed = False)
+                return pGain
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_D_GAIN, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_d_gain_async(self, sid, loop=None):
+        """ dGainの取得（単位無し
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+        f, callback = self.async_wrapper(loop)
+        self.get_d_gain(sid, callback=callback)
+        return f
+
+    def set_d_gain(self, gain, sid=1):
+        """ dGainの書き込み
+
+        :param gain:
+        :param sid:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        # 位置 (-180から180まで)
+        if gain < 0:
+            gain = 0
+        elif gain > 16383:
+            gain = 16383
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_POSITION_D_GAIN, gain, 2)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_max_torque(self, sid, callback=None):
         """最大トルク取得 (%)
@@ -860,19 +1264,7 @@ class RobotisP20(Driver):
         :param callback:
         :return:
         """
-
-        # サーボIDのチェック
-        self.__check_sid(sid)
-
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 1:
-        #         max_torque = response_data[0]
-        #         return max_torque
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_MAX_TORQUE, self.FLAG30_MEM_MAP_SELECT, 1, response_process,
-        #                            sid=sid, callback=callback)
+        raise NotSupportException('RobotisP20ではget_max_torqueに対応していません。')
 
     def get_max_torque_async(self, sid, loop=None):
         """最大トルク取得 async版 (%)
@@ -881,10 +1273,7 @@ class RobotisP20(Driver):
         :param loop:
         :return:
         """
-
-        f, callback = self.async_wrapper(loop)
-        self.get_max_torque(sid, callback=callback)
-        return f
+        raise NotSupportException('RobotisP20ではget_max_torque_asyncに対応していません。')
 
     def set_max_torque(self, torque_percent, sid):
         """最大トルク設定 (%)
@@ -893,23 +1282,7 @@ class RobotisP20(Driver):
         :param sid:
         :return:
         """
-
-        # サーボIDのチェック
-        self.__check_sid(sid)
-
-        # # 0-100%で設定
-        # if torque_percent < 0:
-        #     torque_percent = 0
-        # elif torque_percent > 100:
-        #     torque_percent = 100
-        #
-        # torque_hex = int(torque_percent)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_MAX_TORQUE, [torque_hex])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        raise NotSupportException('RobotisP20ではset_max_torqueに対応していません。')
 
     def get_speed(self, sid, callback=None):
         """現在の回転速度を取得 (deg/s)
@@ -922,15 +1295,18 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         speed = int.from_bytes(response_data, 'little', signed=True)
-        #         return speed
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_PRESENT_SPEED_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                speed = int.from_bytes(response_data, 'little', signed = False)
+                dps = speed * 0.229 * 6
+                return dps
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_VELOCITY, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
 
     def get_speed_async(self, sid, loop=None):
         """現在の回転速度を取得 async版 (deg/s)
@@ -945,8 +1321,27 @@ class RobotisP20(Driver):
         return f
 
     def set_speed(self, dps, sid):
-        """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではset_speedに対応していません。set_target_time()で回転スピードを制御してください。')
+        """回転速度を設定 (deg/s)
+
+        :param dps:
+        :param sid:
+        :return:
+        """
+         # サーボIDのチェック
+        self.__check_sid(sid)
+
+        rev_min = dps / 0.229 / 6.0
+
+        if rev_min < 0:
+            rev_min = 0
+        elif rev_min > 32737:
+            rev_min = 32737
+
+        # コマンド生成
+        params = self.__generate_parameters_read_write(self.ADDR_PROFILE_VELOCITY, rev_min, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
 
     def get_servo_id(self, sid, callback=None):
         """サーボIDを取得
@@ -959,15 +1354,17 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 1:
-        #         servo_id = int.from_bytes(response_data, 'little', signed=False)
-        #         return servo_id
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_SERVO_ID, self.FLAG30_MEM_MAP_SELECT, 1, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                id = int.from_bytes(response_data, 'little', signed = False)
+                return id
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_ID, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
 
     def get_servo_id_async(self, sid, loop=None):
         """サーボIDを取得 async版
@@ -993,22 +1390,30 @@ class RobotisP20(Driver):
         self.__check_sid(new_sid)
         self.__check_sid(sid)
 
-        # # 0-100%で設定
-        # if new_sid < 1:
-        #     new_sid = 1
-        # elif new_sid > 127:
-        #     new_sid = 127
-        #
-        # new_sid_hex = int(new_sid)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_SERVO_ID, [new_sid_hex])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        if new_sid < 0:
+            new_sid = 0
+        elif new_sid > 252:
+            new_sid = 252
+
+
+        params = self.__generate_parameters_read_write(self.ADDR_ID, new_sid, 1)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
 
     def save_rom(self, sid):
         """フラッシュROMに書き込む
+
+        :param sid:
+        :return:
+        """
+        raise NotSupportException('RobotisP20ではsave_romに対応していません。')
+
+    def load_rom(self, sid):
+        raise NotSupportException('RobotisP20ではload_romに対応していません。')
+
+    def reset_memory(self, sid):
+        """ROMを工場出荷時のものに初期化する
 
         :param sid:
         :return:
@@ -1017,11 +1422,7 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_WRITE_FLASH_ROM, flag=0x40, count=0)
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        return self.__get_function(self.INSTRUCTION_FACTORY_RESET, sid=sid)
 
     def get_baud_rate(self, sid, callback=None):
         """通信速度を取得
@@ -1034,15 +1435,17 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 1:
-        #         baud_rate = int.from_bytes(response_data, 'little', signed=False)
-        #         return baud_rate
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_BAUD_RATE, self.FLAG30_MEM_MAP_SELECT, 1, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                baudrate_list = [9600, 57600, 115200, 1000000, 2000000, 3000000, 4000000, 4500000]
+                baudrate = int.from_bytes(response_data, 'little', signed = False)
+                return baudrate_list[baudrate]
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_BAUDRATE, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_baud_rate_async(self, sid, loop=None):
         """通信速度を取得 async版
@@ -1056,10 +1459,10 @@ class RobotisP20(Driver):
         self.get_baud_rate(sid, callback=callback)
         return f
 
-    def set_baud_rate(self, baud_rate_id, sid):
+    def set_baud_rate(self, baud_rate, sid):
         """通信速度を設定
 
-        :param baud_rate_id:
+        :param baud_rate:
         :param sid:
         :return:
         """
@@ -1067,17 +1470,16 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # 通信速度IDのチェック
-        # if self.BAUD_RATE_INDEX_9600 < baud_rate_id > self.BAUD_RATE_INDEX_230400:
-        #     raise BadInputParametersException('baud_rate_id が不正な値です')
-        #
-        # baud_rate_id_hex = int(baud_rate_id)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_BAUD_RATE, [baud_rate_id_hex])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        baud_rate_list = [9600, 57600, 115200, 1000000, 2000000, 3000000, 4000000, 4500000]
+        try:
+            baud_rate_id = baud_rate_list.index(baud_rate)
+        except:
+            raise BadInputParametersException('baud_rate が不正な値です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_BAUDRATE, baud_rate_id, 1)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
 
     def get_limit_cw_position(self, sid, callback=None):
         """右(時計回り)リミット角度の取得
@@ -1090,16 +1492,19 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         limit_position = int.from_bytes(response_data, 'little', signed=True)
-        #         limit_position /= 10
-        #         return limit_position
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_CW_ANGLE_LIMIT_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                limit = int.from_bytes(response_data, 'little', signed = False)
+                limit = limit * 360 / 4096
+                limit = limit - 180
+                return limit
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_MIN_POSITION_LIMIT, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
 
     def get_limit_cw_position_async(self, sid, loop=None):
         """右(時計回り)リミット角度の取得 async版
@@ -1124,19 +1529,16 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # リミット角度のチェック
-        # if 0 < limit_position > 150:
-        #     raise BadInputParametersException('limit_position が不正な値です。0〜+150を設定してください。')
-        #
-        # limit_position_hex = format(int(limit_position * 10) & 0xffff, '04x')
-        # limit_position_hex_h = int(limit_position_hex[0:2], 16)
-        # limit_position_hex_l = int(limit_position_hex[2:4], 16)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_CW_ANGLE_LIMIT_L, [limit_position_hex_l, limit_position_hex_h])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        if limit_position > 0 or limit_position < -180:
+             raise BadInputParametersException('limit_position が不正な値です -180~0を設定してください。')
+
+        limit_position = limit_position + 180
+        limit_position = limit_position / 360 * 4096
+
+        params = self.__generate_parameters_read_write(self.ADDR_MIN_POSITION_LIMIT, limit_position, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
 
     def get_limit_ccw_position(self, sid, callback=None):
         """左(反時計回り)リミット角度の取得
@@ -1149,16 +1551,18 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         limit_position = int.from_bytes(response_data, 'little', signed=True)
-        #         limit_position /= 10
-        #         return limit_position
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_CCW_ANGLE_LIMIT_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                limit = int.from_bytes(response_data, 'little', signed = False)
+                limit = limit * 360 / 4096
+                limit = limit - 180
+                return limit
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_MAX_POSITION_LIMIT, 4, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_limit_ccw_position_async(self, sid, loop=None):
         """左(反時計回り)リミット角度の取得 async版
@@ -1183,20 +1587,15 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # リミット角度のチェック
-        # if -150 < limit_position > 0:
-        #     raise BadInputParametersException('limit_position が不正な値です。-150〜0を設定してください。')
-        #
-        # limit_position_hex = format(int(limit_position * 10 & 0xffff), '04x')
-        # limit_position_hex_h = int(limit_position_hex[0:2], 16)
-        # limit_position_hex_l = int(limit_position_hex[2:4], 16)
-        #
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_CCW_ANGLE_LIMIT_L,
-        #                                   [limit_position_hex_l, limit_position_hex_h])
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        if limit_position < 0 or limit_position > 180:
+             raise BadInputParametersException('limit_position が不正な値です 0~180を設定してください。')
+
+        limit_position = limit_position + 180
+        limit_position = limit_position / 360 * 4096
+
+        params = self.__generate_parameters_read_write(self.ADDR_MAX_POSITION_LIMIT, limit_position, 4)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def get_limit_temperature(self, sid, callback=None):
         """温度リミットの取得 (℃)
@@ -1209,15 +1608,16 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == 2:
-        #         limit_temp = int.from_bytes(response_data, 'little', signed=True)
-        #         return limit_temp
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(self.ADDR_TEMPERATURE_LIMIT_L, self.FLAG30_MEM_MAP_SELECT, 2, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                limit = int.from_bytes(response_data, 'little', signed = False)
+                return limit
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_TEMPERATURE_LIMIT, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def get_limit_temperature_async(self, sid, loop=None):
         """温度リミットの取得 (℃) async版
@@ -1232,8 +1632,120 @@ class RobotisP20(Driver):
         return f
 
     def set_limit_temperature(self, limit_temp, sid):
-        """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではset_limit_temperatureに対応していません。')
+        """温度リミットの設定 (℃) async版
+
+        :param limit_temp:
+        :param loop:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        if limit_temp < 0 or limit_temp > 100:
+             raise BadInputParametersException('limit_temp が不正な値です 0~100を設定してください。')
+
+        params = self.__generate_parameters_read_write(self.ADDR_TEMPERATURE_LIMIT, limit_temp, 1)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_limit_current(self, sid, callback=None):
+        """電流リミットの取得 (mA)
+
+        :param sid:
+        :param callback:
+        :return:
+        """
+
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 2:
+                limit = int.from_bytes(response_data, 'little', signed = False)
+                limit = limit * 2.69
+                return limit
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_CURRENT_LIMIT, 2, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_limit_current_async(self, sid, loop=None):
+        """電流リミットの取得 (mA) async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.async_wrapper(loop)
+        self.get_limit_current(sid, callback=callback)
+        return f
+
+    def set_limit_current(self, limit_current, sid):
+        """電流リミットの書き込み (mA)
+
+        :param limit_current:
+        :param sid:
+        :return:
+        """
+        if limit_current < 0 or limit_current > 3210:
+             raise BadInputParametersException('limit_current が不正な値です 0~3210を設定してください。')
+
+        limit_current = limit_current / 2.69
+
+        params = self.__generate_parameters_read_write(self.ADDR_CURRENT_LIMIT, limit_current, 2)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
+
+    def get_drive_mode(self, sid, callback=None):
+        """動作モードの取得
+
+        :param sid:
+        :param callback:
+        :return:
+        """
+        # サーボIDのチェック
+        self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 1:
+                mode = int.from_bytes(response_data, 'little', signed = False)
+                return mode
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(self.ADDR_DRIVE_MODE, 1, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
+
+    def get_drive_mode_async(self, sid, loop=None):
+        """動作モードの取得 async版
+
+        :param sid:
+        :param loop:
+        :return:
+        """
+
+        f, callback = self.async_wrapper(loop)
+        self.get_drive_mode(sid, callback=callback)
+        return f
+
+    def set_drive_mode(self, drive_mode, sid):
+        """動作モードの書き込み (mA)
+
+        :param drive_mode:
+        :param sid:
+        :return:
+        """
+        if drive_mode > 5:
+             raise BadInputParametersException('limit_current が不正な値です 0~3210を設定してください。')
+
+        params = self.__generate_parameters_read_write(self.ADDR_DRIVE_MODE, drive_mode, 1)
+
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
     def set_burst_target_positions(self, sid_target_positions):
         """複数のサーボの対象ポジションを一度に設定
@@ -1241,31 +1753,20 @@ class RobotisP20(Driver):
         :param sid_target_positions:
         :return:
         """
+        for sid, position in sid_target_positions.items():
+            # 位置 (-180から180まで)
+            if position < -180:
+                position = -180
+            elif position > 180:
+                position = 180
 
-        # # データチェック & コマンドデータ生成
-        # vid_data = {}
-        # for sid, position_degree in sid_target_positions.items():
-        #     # サーボIDのチェック
-        #     self.__check_sid(sid)
-        #
-        #     # 設定可能な範囲は-150.0 度~+150.0 度
-        #     if position_degree < -150:
-        #         position_degree = -150
-        #     elif position_degree > 150:
-        #         position_degree = 150
-        #
-        #     position_hex = format(int(position_degree * 10) & 0xffff, '04x')
-        #     position_hex_h = int(position_hex[0:2], 16)
-        #     position_hex_l = int(position_hex[2:4], 16)
-        #
-        #     vid_data[sid] = [position_hex_l, position_hex_h]
-        #
-        # # コマンド生成
-        # command = self.__generate_burst_command(self.ADDR_GOAL_POSITION_L, 3, vid_data)
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
-        pass
+            # Dynamixelでは0〜360°なので変換
+            position += 180
+
+            # データ変換
+            sid_target_positions[sid] = int(position * 4096 / 360)
+
+        self.burst_write(self.ADDR_GOAL_POSITION, 4, sid_target_positions)
 
     def get_burst_positions(self, sids, callback=None):
         """複数のサーボの現在のポジションを一気にリード
@@ -1274,8 +1775,23 @@ class RobotisP20(Driver):
         :param callback:
         :return:
         """
-        """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではget_burst_positionsに対応していません。')
+        for sid in sids:
+            self.__check_sid(sid)
+
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == 4:
+                # 単位は 0.1 度になっているので、度に変換
+                position = int.from_bytes(response_data, 'little', signed=True)
+                position = position * 360 / 4096
+                position = position - 180
+                return position
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_sync_read(self.ADDR_PRESENT_POSITION, 4, sids)
+
+        return self.__get_function_burstread(self.INSTRUCTION_SYNC_READ, params, 0xFE, len(sids), response_process, callback=callback)
+
 
     def get_burst_positions_async(self, sids, loop=None):
         """複数のサーボの現在のポジションを一気にリード async版
@@ -1284,24 +1800,9 @@ class RobotisP20(Driver):
         :param loop:
         :return:
         """
-        """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではget_burst_positions_asyncに対応していません。')
-
-    def reset_memory(self, sid):
-        """ROMを工場出荷時のものに初期化する
-
-        :param sid:
-        :return:
-        """
-
-        # サーボIDのチェック
-        self.__check_sid(sid)
-
-        # # コマンド生成
-        # command = self.__generate_command(sid, self.ADDR_RESET_MEMORY, flag=self.FLAG4_RESET_MEMORY_MAP, count=0)
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        f, callback = self.async_wrapper(loop)
+        self.get_burst_positions(sids, callback=callback)
+        return f
 
     def read(self, sid, address, length, callback=None):
         """データを読み込む
@@ -1313,17 +1814,19 @@ class RobotisP20(Driver):
         :return:
         """
 
-        # サーボIDのチェック
+# サーボIDのチェック
         self.__check_sid(sid)
 
-        # def response_process(response_data):
-        #     if response_data is not None and len(response_data) == length:
-        #         return response_data
-        #     else:
-        #         raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
-        #
-        # return self.__get_function(address, self.FLAG30_MEM_MAP_SELECT, length, response_process,
-        #                            sid=sid, callback=callback)
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == length:
+                data = int.from_bytes(response_data, 'little', signed = False)
+                return data
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
+
+        params = self.__generate_parameters_read_write(address, length, 2)
+
+        return self.__get_function(self.INSTRUCTION_READ, params, response_process, sid=sid, callback=callback)
 
     def read_async(self, sid, address, length, loop=None):
         """データを読み込む async版
@@ -1351,13 +1854,11 @@ class RobotisP20(Driver):
         # サーボIDのチェック
         self.__check_sid(sid)
 
-        # # コマンド生成
-        # command = self.__generate_command(sid, address, data)
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
+        params = self.__generate_parameters_read_write(address, int.from_bytes(data, 'little', signed = False), len(data))
+        return self.__get_function(self.INSTRUCTION_WRITE, params, sid=sid, callback=self.__callback_write_response)
 
-    def burst_read(self, sid_address_length, callback=None):
+
+    def burst_read(self, address, length, sids, callback=None):
         """複数サーボから一括でデータ読み取り
 
         :param sid_address_length:
@@ -1365,9 +1866,19 @@ class RobotisP20(Driver):
         :return:
         """
         """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではburst_readに対応していません。')
+        def response_process(response_data):
+            if response_data is not None and len(response_data) == length:
+                data = int.from_bytes(response_data, 'little', signed = False)
+                return data
+            else:
+                raise InvalidResponseDataException('サーボからのレスポンスデータが不正です')
 
-    def burst_read_async(self, sid_address_length, loop=None):
+        params = self.__generate_parameters_sync_read(address, length, sids)
+
+        return self.__get_function_burstread(self.INSTRUCTION_SYNC_READ, params, 0xFE, num, response_process, callback=callback)
+
+
+    def burst_read_async(self, address, length, sid_list, num, loop=None):
         """複数サーボから一括でデータ読み取り async版
 
         :param sid_address_length:
@@ -1375,7 +1886,9 @@ class RobotisP20(Driver):
         :return:
         """
         """Futabaでは未サポート"""
-        raise NotSupportException('Futabaではburst_read_asyncに対応していません。')
+        f, callback = self.async_wrapper(loop)
+        self.burst_read(sid, address, length, sid_list, num, callback=callback)
+        return f
 
     def burst_write(self, address, length, sid_data):
         """複数サーボに一括で書き込み
@@ -1386,17 +1899,13 @@ class RobotisP20(Driver):
         :return:
         """
 
-        # # データチェック & コマンドデータ生成
-        # vid_data = {}
-        # for sid, data in sid_data.items():
-        #     # サーボIDのチェック
-        #     self.__check_sid(sid)
-        #
-        #     vid_data[sid] = data
-        #
-        # # コマンド生成
-        # command = self.__generate_burst_command(address, length, vid_data)
-        #
-        # # データ送信バッファに追加
-        # self.add_command_queue(command)
-        pass
+        params = []
+        for sid, data in sid_data.items():
+            # サーボIDのチェック
+            self.__check_sid(sid)
+            params.append(sid)
+            params.append(data)
+
+        params = self.__generate_parameters_sync_write(address, length, params)
+
+        return self.__get_function_burstread(self.INSTRUCTION_SYNC_WRITE, params, 0xFE, 0, callback=self.__callback_write_response)
