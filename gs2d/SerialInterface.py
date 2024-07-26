@@ -53,7 +53,7 @@ class SerialInterface(ISerialInterface):
         logger.debug('Device name: {}, Baudrate: {}'.format(device, baudrate))
 
         # シリアルデバイス生成
-        self.__ser = serial.Serial(device, baudrate, timeout=0.1)
+        self.ser = serial.Serial(device, baudrate, timeout=0.1)
 
     def write(self, data):
         """データ送信
@@ -62,7 +62,7 @@ class SerialInterface(ISerialInterface):
         :return:
         """
 
-        return self.__ser.write(data)
+        return self.ser.write(data)
 
     def read(self):
         """サーボからのデータ1文字受信
@@ -70,7 +70,7 @@ class SerialInterface(ISerialInterface):
         :return:
         """
 
-        return self.__ser.read()
+        return self.ser.read()
 
     def is_open(self):
         """シリアルインタフェースがオープンされているかチェック
@@ -78,7 +78,7 @@ class SerialInterface(ISerialInterface):
         :return:
         """
 
-        return self.__ser.is_open
+        return self.ser.is_open
 
     def close(self):
         """シリアルインタフェースをクローズ
@@ -86,4 +86,4 @@ class SerialInterface(ISerialInterface):
         :return:
         """
 
-        self.__ser.close()
+        self.ser.close()
